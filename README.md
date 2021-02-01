@@ -1,4 +1,4 @@
-# bot
+# Python Discord Bot
 
 ## ¿Por qué no hay un bot actualmente?
 
