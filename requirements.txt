@@ -1,0 +1,4 @@
+discord.py
+pandas
+emoji
+toml
