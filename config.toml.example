@@ -1,0 +1,19 @@
+[bot]
+token="..."
+id=
+general_log="log.csv"
+moderation_log="moderation.csv"
+
+[server]
+guild=
+
+[channels]
+    [channels.eventos]
+    main=
+    moderation=
+    submission=
+
+    [channels.ofertas]
+    main=
+    moderation=
+    submission=
