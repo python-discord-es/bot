@@ -121,26 +121,34 @@ async def mod(ctx):
 
                     msg = (
                         f"Post de {author.mention} el {m_date}\n"
-                        f"ID: {m_message_id}\n"
-                        f"Message:\n"
+                        f"**ID:** {m_message_id}\n"
+                        f"**Mensaje:**\n"
                         f"```\n{m_message}\n```\n"
                     )
-                    await channel_mod.send(msg)
+                    embed = discord.Embed(
+                        title=f"Mensaje pendiente de moderación",
+                        description=msg,
+                        colour=0x2b597b,
+                    )
+                    await channel_mod.send(embed=embed)
                 else:
                     await channel_mod.send(f"ID no encontrado: {post_id}")
         else:
             # Imprimir todos los posts que necesitan moderación
-            msg = "Mensajes pendientes de moderación:"
+            msg = ""
             messages = False
             for idx, mod_row in data_mod.iterrows():
                 m_date = mod_row["date"]
                 m_message_id = mod_row["message_id"]
                 m_message = base64.b64decode(eval(mod_row["message"])).decode("utf-8")
-                m_author = mod_row["author"]
+                m_author_id = mod_row["author_id"]
+                author = bot.get_user(int(m_author_id))
 
                 msg += (
-                    f"\n- **{m_message_id}** ({m_author}) en `{m_date}`\n"
-                    f"\t\t```{m_message[:30]}...```\n"
+                    f"\n**{m_message_id}** ({author.mention}) en `{m_date}`\n"
+                    f"```\n"
+                    f"{m_message[:30]}...\n"
+                    f"```\n\n"
                 )
                 if not messages:
                     messages = True
@@ -148,7 +156,13 @@ async def mod(ctx):
             if not messages:
                 msg = "No hay mensajes pendientes de moderación"
 
-            await channel_mod.send(msg)
+            embed = discord.Embed(
+                title=f"Mensajes pendientes de moderación",
+                description=msg,
+                colour=0x2b597b,
+            )
+
+            await channel_mod.send(embed=embed)
 
 
 @bot.command(
@@ -305,70 +319,121 @@ async def aceptar(ctx):
             else:
                 await channel_mod.send(f"El ID {post_id} no fue encontrado")
 
+async def spam_check(message):
+    global main_mod_channel
+    spam_words = ('discord', 'nitro', 'free', 'http')
+
+    if message.author.id != BOT_ID:
+        if not main_mod_channel:
+            main_mod_channel = bot.get_channel(MOD_MAIN)
+        content = message.content.lower()
+        if all(i in content for i in spam_words):
+            msg = (f"  **User:** {message.author.mention}\n"
+                   f"  **Mensaje:**\n "
+                   f"```"
+                   f"{message.content}"
+                   f"```\n\n"
+                   "En caso de ser SPAM, recuerda hacer `click-derecho` sobre el nickname y **banear**.")
+            embed = discord.Embed(
+                title=f"\N{WARNING SIGN} Alerta de posible SPAM",
+                description=msg,
+                colour=0xff0000,
+            )
+            await main_mod_channel.send(embed=embed)
+            return True
+    return False
+
 
 @bot.event
 async def on_message(message):
     global data_mod
     await bot.process_commands(message)
 
-    # Check which channel combination we are using
-    channel_mod = None
-    channel_sub = None
-    for channel, values in CHANNELS.items():
-        if message.channel.id == values["submission"]:
-            channel_mod = bot.get_channel(values["moderation"])
-            channel_sub = bot.get_channel(values["submission"])
-
-    # Moderación Canal X
-    if channel_mod and channel_sub and message.author.id != BOT_ID:
-
-        # Log
-        # Add the new row to the data_mod, to have it in runtime
-        # Add the new entry to the dat_mod file, to have it for the next time
-        with open(str(log_mod_file), "a") as f:
-            # date;message_id;channel;author;message
-            message_enc = base64.b64encode(message.content.encode("utf-8"))
-            date_str = f"{datetime.now()}"
-            line = (
-                f'"{date_str}";'
-                f'"{message.id}";'
-                f'"{channel_sub}";'
-                f'"{message.author.id}";'
-                f'"{message.author}";'
-                f'"{message_enc}"\n'
-            )
-            print(line)
-
-            # dictionary to add the data to the runtime DataFrame
-            new_data = {
-                "date": date_str,
-                "message_id": f"{message.id}",
-                "channel": f"{channel_sub}",
-                "author_id": f"{message.author.id}",
-                "author": f"{message.author}",
-                "message": f"{message_enc}",
-            }
-            data_mod = data_mod.append(new_data, ignore_index=True)
-
-            # Writing data to the CSV file
-            f.write(line)
-
-        reply_msg = await channel_sub.send(f"Gracias por tu envio {message.author.mention}")
-        aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
-        rechazar_emoji = "\N{CROSS MARK}"
-        await channel_mod.send(
-            f"Oferta enviada por {message.author.mention}\n\n"
-            f"```\n{message.content}\n```\n"
-            f"{aceptar_emoji} Para aceptar enviar `%aceptar {message.id}`\n"
-            f"{rechazar_emoji} Para rechazar enviar `%rechazar {message.id} 'razón del rechazo'`"
+    if await spam_check(message):
+        await discord.Message.delete(message)
+        channel = bot.get_channel(message.channel.id)
+        msg = (f"El mensaje del usuario {message.author.mention} fue borrado y podría ser un engaño.\n"
+                "Evita `hacer click` en enlaces de **usuarios que no conozcas**.")
+        embed = discord.Embed(
+            title=f"\N{NO ENTRY} Alerta de posible SPAM",
+            description=msg,
+            colour=0x2b597b,
         )
-        time.sleep(3)
-        print("!", reply_msg)
-        await discord.Message.delete(message)
+        reply_msg = await channel.send(embed=embed)
+        time.sleep(10)
+        await discord.Message.delete(reply_msg)
+    else:
+        # Check which channel combination we are using
+        channel_mod = None
+        channel_sub = None
+        channel_id = None
+        for channel, values in CHANNELS.items():
+            if message.channel.id == values["submission"]:
+                channel_mod = bot.get_channel(values["moderation"])
+                channel_sub = bot.get_channel(values["submission"])
 
-    elif channel_sub:
-        time.sleep(3)
-        await discord.Message.delete(message)
+        # Moderación Canal X
+        if channel_mod and channel_sub and message.author.id != BOT_ID:
+
+            # Log
+            # Add the new row to the data_mod, to have it in runtime
+            # Add the new entry to the dat_mod file, to have it for the next time
+            with open(str(log_mod_file), "a") as f:
+                # date;message_id;channel;author;message
+                message_enc = base64.b64encode(message.content.encode("utf-8"))
+                date_str = f"{datetime.now()}"
+                line = (
+                    f'"{date_str}";'
+                    f'"{message.id}";'
+                    f'"{channel_sub}";'
+                    f'"{message.author.id}";'
+                    f'"{message.author}";'
+                    f'"{message_enc}"\n'
+                )
+                print(line)
+
+                # dictionary to add the data to the runtime DataFrame
+                new_data = {
+                    "date": date_str,
+                    "message_id": f"{message.id}",
+                    "channel": f"{channel_sub}",
+                    "author_id": f"{message.author.id}",
+                    "author": f"{message.author}",
+                    "message": f"{message_enc}",
+                }
+                data_mod = data_mod.append(new_data, ignore_index=True)
+
+                # Writing data to the CSV file
+                f.write(line)
+
+            embed_reply = discord.Embed(
+                title=f"Mensaje Enviado",
+                description=f"Gracias {message.author.mention}, tu mensaje espera moderación.",
+                colour=0x2b597b,
+            )
+            reply_msg = await channel_sub.send(embed=embed_reply)
+            aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
+            rechazar_emoji = "\N{CROSS MARK}"
+            msg = (
+                f"{datetime.utcnow()} UTC\n"
+                f"Mensaje enviado desde {message.channel.mention} por {message.author.mention}\n\n"
+                f"```\n{message.content}\n```\n\n**¿Cumple con todos los requisitos?**\n\n"
+                f"{aceptar_emoji} Para aceptarlo, envía el siguiente mensaje:\n\n`%aceptar {message.id}`\n\n"
+                f"{rechazar_emoji} Para rechazarlo, envía el siguiente mensaje:\n\n`%rechazar {message.id} 'razón del rechazo'`"
+            )
+            embed = discord.Embed(
+                title=f"Moderación de mensaje",
+                description=msg,
+                colour=0x2b597b,
+            )
+            await channel_mod.send(embed=embed)
+            time.sleep(3)
+            print("!", reply_msg)
+            await discord.Message.delete(message)
+
+        elif channel_sub:
+            time.sleep(3)
+            await discord.Message.delete(message)
 
 
 @bot.command(name="encuesta", help="Comando de encuesta", pass_context=True)
@@ -478,6 +543,7 @@ if __name__ == "__main__":
     GUILD = config["server"]["guild"]
     CHANNELS = config["channels"]
 
+    MOD_MAIN = config["bot"]["moderation_main"]
     LOG_FILE = config["bot"]["general_log"]
     LOG_MOD_FILE = config["bot"]["moderation_log"]
 
@@ -491,6 +557,9 @@ if __name__ == "__main__":
 
     log_accepted_file = Path(LOG_MOD_ACCEPTED_FILE)
     log_rejected_file = Path(LOG_MOD_REJECTED_FILE)
+
+    # Main moderation channel
+    main_mod_channel = None
 
     # Checking files
     if not log_file.is_file():
