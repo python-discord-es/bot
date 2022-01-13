@@ -321,13 +321,16 @@ async def aceptar(ctx):
 
 async def spam_check(message):
     global main_mod_channel
-    spam_words = ('discord', 'nitro', 'free', 'http')
+    spam_words = [('discord', 'nitro', 'free', 'http'),
+                  ('nitro', 'month', 'http'),
+                  ('discord', 'gift'),
+                  ('nitro', 'gift')]
 
     if message.author.id != BOT_ID:
         if not main_mod_channel:
             main_mod_channel = bot.get_channel(MOD_MAIN)
         content = message.content.lower()
-        if all(i in content for i in spam_words):
+        if any(all(i in content for i in sw) for sw in spam_words):
             msg = (f"  **User:** {message.author.mention}\n"
                    f"  **Mensaje:**\n "
                    f"```"
