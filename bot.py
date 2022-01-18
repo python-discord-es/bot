@@ -35,34 +35,45 @@ async def ayuda(ctx):
     channel_mod = get_moderation_channel(ctx.channel.id)
 
     if channel_mod:
-        msg = (
-            "Comandos disponibles:\n"
-            "```"
-            "%mod               - Lista todos los post pendientes de moderación\n"
-            "%mod ID            - Lista información del post ID pendiente de moderación\n"
-            "%aceptar ID        - Acepta mensaje, lo envia al canal asociado\n"
-            "%rechazar ID RAZON - Rechaza el mensaje ID, lo envia al canal asociado\n"
-            "                     El usuario será notificado, con el mensaje RAZON\n"
-            "%limpia N          - Limpia N mensajes del canal de moderación\n"
-            "```"
+        embed = discord.Embed(
+            title=f"Comandos Disponibles",
+            colour=0x2b597b,
         )
-
-        await channel_mod.send(msg)
+        embed.add_field(name="`%mod`",
+                        value="Lista todos los post pendientes de moderación",
+                        inline=False)
+        embed.add_field(name="`%mod ID`",
+                        value="Lista información del post ID pendiente de moderación",
+                        inline=False)
+        embed.add_field(name="`%aceptar ID`",
+                        value="Acepta mensaje, lo envia al canal asociado",
+                        inline=False)
+        embed.add_field(name="`%rechazar ID RAZON`",
+                        value=("Rechaza el mensaje ID, lo envia al canal asociado. "
+                               "El usuario será notificado, con el mensaje RAZON"),
+                        inline=False)
+        embed.add_field(name="`%limpia`",
+                        value="Limpia N mensajes del canal de moderación",
+                        inline=False)
+        await channel_mod.send(embed=embed)
     else:
         msg = (
-            "Comandos disponibles:\n"
-            "```"
-            '%encuesta "pregunta"\n'
-            "    Para hacer preguntas de Sí y No\n"
-            '    Ejemplo: %encuesta "¿Te gusta el té?"\n\n'
-            '%encuesta "pregunta" "opción a" "opción b" ...\n'
-            "    Para hacer preguntas con varias opciones.\n"
-            '    Ejemplo: %encuesta "¿Cuál es tu lenguaje favorito?" "Inglés" "Español" "Python"\n\n'
-            'Importante: La pregunta y opciones deben ir entre comillas dobles "..."'
-            "```"
         )
 
-        await ctx.channel.send(msg)
+        embed = discord.Embed(
+            title=f"Comandos Disponibles",
+            colour=0x2b597b,
+        )
+        embed.add_field(name='`%encuesta "pregunta"`',
+                        value=("Para hacer preguntas de Sí y No.\n"
+                               'Ejemplo:\n `%encuesta "¿Te gusta el té?"`'),
+                        inline=False)
+        embed.add_field(name='`%encuesta "pregunta" "opción a" "opción b" ...`',
+                        value=("Para hacer preguntas con varias opciones.\n"
+                               'Ejemplo:\n `%encuesta "¿Cuál es tu lenguaje favorito?" "Inglés" "Español" "Python"`'),
+                        inline=False)
+        embed.set_footer(text='Importante: La pregunta y opciones deben ir entre comillas dobles "..."')
+        await ctx.channel.send(embed=embed)
 
 
 @bot.command(name="limpia", help="Comando para limpiar historial de moderación", pass_context=True)
