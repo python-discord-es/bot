@@ -1,18 +1,33 @@
 import sys
 import toml
 import time
+from pprint import pprint
 
 import base64
 import discord
 import pandas as pd
-from discord.ext import commands
+from discord.ext import commands, tasks
 from pathlib import Path
 from datetime import datetime
+
+from utils import (
+    get_mod_help,
+    get_main_help,
+    get_mod_pending,
+    get_message_to_moderate,
+    get_help_error,
+)
 
 
 # Use '%' as command prefix
 intents = discord.Intents().all()
 bot = commands.Bot(command_prefix="%", intents=intents)
+
+# For flood protection
+d_messages = {}
+
+# Global instance of the server
+guild = None
 
 
 def get_moderation_channel(current_id):
@@ -35,45 +50,11 @@ async def ayuda(ctx):
     channel_mod = get_moderation_channel(ctx.channel.id)
 
     if channel_mod:
-        embed = discord.Embed(
-            title=f"Comandos Disponibles",
-            colour=0x2b597b,
-        )
-        embed.add_field(name="`%mod`",
-                        value="Lista todos los post pendientes de moderación",
-                        inline=False)
-        embed.add_field(name="`%mod ID`",
-                        value="Lista información del post ID pendiente de moderación",
-                        inline=False)
-        embed.add_field(name="`%aceptar ID`",
-                        value="Acepta mensaje, lo envia al canal asociado",
-                        inline=False)
-        embed.add_field(name="`%rechazar ID RAZON`",
-                        value=("Rechaza el mensaje ID, lo envia al canal asociado. "
-                               "El usuario será notificado, con el mensaje RAZON"),
-                        inline=False)
-        embed.add_field(name="`%limpia`",
-                        value="Limpia N mensajes del canal de moderación",
-                        inline=False)
-        await channel_mod.send(embed=embed)
+        e = get_mod_help()
+        await channel_mod.send(embed=e)
     else:
-        msg = (
-        )
-
-        embed = discord.Embed(
-            title=f"Comandos Disponibles",
-            colour=0x2b597b,
-        )
-        embed.add_field(name='`%encuesta "pregunta"`',
-                        value=("Para hacer preguntas de Sí y No.\n"
-                               'Ejemplo:\n `%encuesta "¿Te gusta el té?"`'),
-                        inline=False)
-        embed.add_field(name='`%encuesta "pregunta" "opción a" "opción b" ...`',
-                        value=("Para hacer preguntas con varias opciones.\n"
-                               'Ejemplo:\n `%encuesta "¿Cuál es tu lenguaje favorito?" "Inglés" "Español" "Python"`'),
-                        inline=False)
-        embed.set_footer(text='Importante: La pregunta y opciones deben ir entre comillas dobles "..."')
-        await ctx.channel.send(embed=embed)
+        e = get_main_help()
+        await ctx.channel.send(embed=e)
 
 
 @bot.command(name="limpia", help="Comando para limpiar historial de moderación", pass_context=True)
@@ -137,43 +118,16 @@ async def mod(ctx):
                         f"```\n{m_message}\n```\n"
                     )
                     embed = discord.Embed(
-                        title=f"Mensaje pendiente de moderación",
+                        title="Mensaje pendiente de moderación",
                         description=msg,
-                        colour=0x2b597b,
+                        colour=0x2B597B,
                     )
                     await channel_mod.send(embed=embed)
                 else:
                     await channel_mod.send(f"ID no encontrado: {post_id}")
         else:
-            # Imprimir todos los posts que necesitan moderación
-            msg = ""
-            messages = False
-            for idx, mod_row in data_mod.iterrows():
-                m_date = mod_row["date"]
-                m_message_id = mod_row["message_id"]
-                m_message = base64.b64decode(eval(mod_row["message"])).decode("utf-8")
-                m_author_id = mod_row["author_id"]
-                author = bot.get_user(int(m_author_id))
-
-                msg += (
-                    f"\n**{m_message_id}** ({author.mention}) en `{m_date}`\n"
-                    f"```\n"
-                    f"{m_message[:30]}...\n"
-                    f"```\n\n"
-                )
-                if not messages:
-                    messages = True
-
-            if not messages:
-                msg = "No hay mensajes pendientes de moderación"
-
-            embed = discord.Embed(
-                title=f"Mensajes pendientes de moderación",
-                description=msg,
-                colour=0x2b597b,
-            )
-
-            await channel_mod.send(embed=embed)
+            e = get_mod_pending(data_mod, bot)
+            await channel_mod.send(embed=e)
 
 
 @bot.command(
@@ -330,32 +284,112 @@ async def aceptar(ctx):
             else:
                 await channel_mod.send(f"El ID {post_id} no fue encontrado")
 
+
 async def spam_check(message):
     global main_mod_channel
-    spam_words = [('discord', 'nitro', 'free', 'http'),
-                  ('nitro', 'month', 'http'),
-                  ('discord', 'gift'),
-                  ('nitro', 'gift')]
+    spam_words = [
+        ("discord", "nitro", "free", "http"),
+        ("discord", "nitro", "gift", "http"),
+        ("discord", "nitro", "month", "http"),
+        ("discord", "gift", "http"),
+        ("discord", "free", "http"),
+        ("discord", "month", "http"),
+        ("nitro", "free", "http"),
+        ("nitro", "gift", "http"),
+        ("nitro", "month", "http"),
+        ("free", "gift", "http"),
+        ("everyone", "gift", "http"),
+        ("everyone", "free", "http"),
+    ]
 
     if message.author.id != BOT_ID:
         if not main_mod_channel:
             main_mod_channel = bot.get_channel(MOD_MAIN)
         content = message.content.lower()
         if any(all(i in content for i in sw) for sw in spam_words):
-            msg = (f"  **User:** {message.author.mention}\n"
-                   f"  **Mensaje:**\n "
-                   f"```"
-                   f"{message.content}"
-                   f"```\n\n"
-                   "En caso de ser SPAM, recuerda hacer `click-derecho` sobre el nickname y **banear**.")
+            msg = (
+                f"  **User:** {message.author.mention}\n"
+                f"  **Mensaje:**\n "
+                f"```"
+                f"{message.content}"
+                f"```\n\n"
+                "En caso de ser SPAM, recuerda hacer `click-derecho` sobre el nickname y **banear**."
+            )
             embed = discord.Embed(
-                title=f"\N{WARNING SIGN} Alerta de posible SPAM",
+                title="\N{WARNING SIGN} Alerta de posible SPAM",
                 description=msg,
-                colour=0xff0000,
+                colour=0xFF0000,
             )
             await main_mod_channel.send(embed=embed)
             return True
     return False
+
+
+async def flood_check(message):
+    global main_mod_channel, d_messages, guild
+
+    if message.author.id != BOT_ID:
+        if not main_mod_channel:
+            main_mod_channel = bot.get_channel(MOD_MAIN)
+
+        _channel = bot.get_channel(message.channel.id)
+        _content = message.content.strip()
+        _author = message.author
+
+        if _author not in d_messages:
+            d_messages[_author] = {_content: 1}
+        else:
+            if _content not in d_messages[_author]:
+                d_messages[_author][_content] = 1
+            else:
+                d_messages[_author][_content] += 1
+                if d_messages[_author][_content] >= 3:
+
+                    if not guild:
+                        guild = bot.get_guild(GUILD)
+                    coord_role = discord.utils.get(guild.roles, name=MOD_ROLE)
+                    msg = (
+                        f"{coord_role.mention} Se detectaton mensajes repetitivos de "
+                        f"{message.author.mention} y se ha muteado."
+                    )
+                    e = discord.Embed(
+                        title="\N{NO ENTRY} Alerta de Flood",
+                        description=msg,
+                        colour=0x2B597B,
+                    )
+                    e.add_field(name="Mensaje", value=f"{_content}", inline=False)
+                    e.add_field(
+                        name="En caso de ser spam",
+                        value=(
+                            "Recuerda banear al usuario haciendo click derecho sobre su "
+                            "nick y seleccionando la opción 'Ban'"
+                        ),
+                        inline=False,
+                    )
+                    e.add_field(
+                        name="En caso de ser un error",
+                        value=(
+                            'Remueve el rol "Muted" haciendo click derecho en el nick, '
+                            'luego "Roles" y deselecciona el rol "Muted".'
+                        ),
+                        inline=False,
+                    )
+                    await main_mod_channel.send(embed=e)
+
+                    # Set muted role
+                    role = discord.utils.get(_author.guild.roles, name=MUTED_ROLE)
+                    await _author.add_roles(role)
+
+                    # Reset author counters
+                    d_messages[_author] = {}
+
+                    # Send message notifying the user is muted
+                    await _channel.send(
+                        f"Usuario {_author.mention} silenciado por enviar mensajes repetitivos. "
+                        f"El equipo de coordinación ha sido notificado."
+                    )
+        pprint(d_messages)
+        print("\n\n")
 
 
 @bot.event
@@ -363,28 +397,36 @@ async def on_message(message):
     global data_mod
     await bot.process_commands(message)
 
-    if await spam_check(message):
+    user_roles = message.author.roles
+
+    if len(user_roles) == 1 and await spam_check(message):
         await discord.Message.delete(message)
         channel = bot.get_channel(message.channel.id)
-        msg = (f"El mensaje del usuario {message.author.mention} fue borrado y podría ser un engaño.\n"
-                "Evita `hacer click` en enlaces de **usuarios que no conozcas**.")
+        msg = (
+            f"El mensaje del usuario {message.author.mention} fue borrado y podría ser un engaño.\n"
+            "Evita `hacer click` en enlaces de **usuarios que no conozcas**."
+        )
         embed = discord.Embed(
-            title=f"\N{NO ENTRY} Alerta de posible SPAM",
+            title="\N{NO ENTRY} Alerta de posible SPAM",
             description=msg,
-            colour=0x2b597b,
+            colour=0x2B597B,
         )
         reply_msg = await channel.send(embed=embed)
         time.sleep(10)
         await discord.Message.delete(reply_msg)
     else:
+
         # Check which channel combination we are using
         channel_mod = None
         channel_sub = None
-        channel_id = None
         for channel, values in CHANNELS.items():
             if message.channel.id == values["submission"]:
                 channel_mod = bot.get_channel(values["moderation"])
                 channel_sub = bot.get_channel(values["submission"])
+
+        if len(user_roles) == 1:
+            # Check flood per message
+            await flood_check(message)
 
         # Moderación Canal X
         if channel_mod and channel_sub and message.author.id != BOT_ID:
@@ -421,26 +463,13 @@ async def on_message(message):
                 f.write(line)
 
             embed_reply = discord.Embed(
-                title=f"Mensaje Enviado",
+                title="Mensaje Enviado",
                 description=f"Gracias {message.author.mention}, tu mensaje espera moderación.",
-                colour=0x2b597b,
+                colour=0x2B597B,
             )
             reply_msg = await channel_sub.send(embed=embed_reply)
-            aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
-            rechazar_emoji = "\N{CROSS MARK}"
-            msg = (
-                f"{datetime.utcnow()} UTC\n"
-                f"Mensaje enviado desde {message.channel.mention} por {message.author.mention}\n\n"
-                f"```\n{message.content}\n```\n\n**¿Cumple con todos los requisitos?**\n\n"
-                f"{aceptar_emoji} Para aceptarlo, envía el siguiente mensaje:\n\n`%aceptar {message.id}`\n\n"
-                f"{rechazar_emoji} Para rechazarlo, envía el siguiente mensaje:\n\n`%rechazar {message.id} 'razón del rechazo'`"
-            )
-            embed = discord.Embed(
-                title=f"Moderación de mensaje",
-                description=msg,
-                colour=0x2b597b,
-            )
-            await channel_mod.send(embed=embed)
+            e = get_message_to_moderate(message)
+            await channel_mod.send(embed=e)
             time.sleep(3)
             print("!", reply_msg)
             await discord.Message.delete(message)
@@ -478,18 +507,8 @@ async def encuesta(ctx, *args):
     # Errors
     n = len(args)
     if n < 1:
-        await ctx.send(
-            "\N{NO ENTRY} No se encontró ningún argumento.\n\n"
-            "**¿Cómo realizar encuestas?**\n"
-            "Para preguntas de **Sí** y **No**::\n"
-            "```\n"
-            '%encuesta "pregunta"'
-            "```\n"
-            "y para preguntas de **múltiples opciones**:\n"
-            "```"
-            '%encuesta "pregunta" "opción 1" "opción 2" "..."'
-            "```\n"
-        )
+        e = get_help_error()
+        await ctx.send(embed=e)
         return
 
     # Error, because one question, with one option makes no sense.
@@ -526,7 +545,10 @@ async def encuesta(ctx, *args):
 # different, and we need to find the message by the 'payload' ID first.
 @bot.event
 async def on_raw_reaction_add(payload):
-    guild = bot.get_guild(payload.guild_id)
+    global guild
+    if not guild:
+        # guild = bot.get_guild(payload.guild_id)
+        guild = bot.get_guild(GUILD)
     channel = guild.get_channel(payload.channel_id)
 
     try:
@@ -540,6 +562,19 @@ async def on_raw_reaction_add(payload):
                         await message.remove_reaction(payload.emoji, payload.member)
     except discord.errors.NotFound:
         print("! Mensaje no encontrado")
+
+
+@bot.event
+async def on_ready():
+    clear_messages.start()
+    print("Staring flood detection...")
+
+
+# Remove messages every hour
+@tasks.loop(seconds=60*60)
+async def clear_messages():
+    global d_messages
+    d_messages = {}
 
 
 if __name__ == "__main__":
@@ -558,6 +593,8 @@ if __name__ == "__main__":
     CHANNELS = config["channels"]
 
     MOD_MAIN = config["bot"]["moderation_main"]
+    MOD_ROLE = config["bot"]["moderation_role"]
+    MUTED_ROLE = config["bot"]["muted_role"]
     LOG_FILE = config["bot"]["general_log"]
     LOG_MOD_FILE = config["bot"]["moderation_log"]
 
