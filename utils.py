@@ -71,13 +71,16 @@ def get_mod_pending(data, bot):
         m_author_id = mod_row["author_id"]
         author = bot.get_user(int(m_author_id))
 
-        embed.add_field(
-            name=f"`{m_message_id}`",
-            value=(f"{m_message[:30]}...\n" f"Fecha: `{m_date}`\n" f"Autor: {author.mention}"),
-            inline=False,
-        )
-        if not messages:
-            messages = True
+        if author:
+            embed.add_field(
+                name=f"`{m_message_id}`",
+                value=(f"{m_message[:30]}...\n" f"Fecha: `{m_date}`\n" f"Autor: {author.mention}"),
+                inline=False,
+            )
+            if not messages:
+                messages = True
+        else:
+            print(f"El author '{m_author_id}' ya no existe en el server. Mensaje {m_message}")
 
     if not messages:
         embed.set_footer(text="No hay mensajes pendientes de moderación")
