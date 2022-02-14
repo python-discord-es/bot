@@ -42,13 +42,6 @@ MENTIONS_LIMIT = 3
 
 def add_spam_message(message):
     global d_spam_messages
-    with open(log_spam_file, "a") as f:
-        f.write(f"{message}\n")
-    d_spam_messages.add(message)
-
-
-def add_spam_message(message):
-    global d_spam_messages
     with open(config.log_spam_file, "a") as f:
         f.write(f"{message}\n")
     d_spam_messages.add(message)
@@ -384,7 +377,6 @@ async def on_message(message):
                     f'"{message.author}";'
                     f'"{message_enc}"\n'
                 )
-                print(line)
 
                 # dictionary to add the data to the runtime DataFrame
                 new_data = {
@@ -409,7 +401,6 @@ async def on_message(message):
             e = get_message_to_moderate(message)
             await channel_mod.send(embed=e)
             time.sleep(3)
-            print("!", reply_msg)
             await discord.Message.delete(message)
 
         elif channel_sub:
@@ -532,7 +523,6 @@ async def rechazar(ctx):
                         f'"{ctx.message.author}";'
                         f'"{_post_reason}"\n'
                     )
-                    print(line)
                     # Writing data to the CSV file
                     f.write(line)
 
@@ -614,7 +604,6 @@ async def aceptar(ctx):
                         f'"{mod_row["message"].values[0]}";'
                         f'"{ctx.message.author}"\n'
                     )
-                    print(line)
                     # Writing data to the CSV file
                     f.write(line)
 
@@ -653,7 +642,6 @@ async def encuesta(ctx, *args):
             f'"{ctx.message.author}";'
             f'"{message_enc}"\n'
         )
-        print(line)
         f.write(line)
 
     # Errors
@@ -747,24 +735,10 @@ if __name__ == "__main__":
     data_accepted = pd.read_csv(str(config.log_accepted_file), sep=";", dtype=str)
     data_rejected = pd.read_csv(str(config.log_rejected_file), sep=";", dtype=str)
 
-    if not log_spam_file.is_file():
-        with open(str(log_spam_file), "w") as f:
-            f.write("\n")
-
-    if not log_main_file.is_file():
-        with open(str(log_main_file), "w") as f:
-            f.write("date;command;message_id;channel;author_id;author;message\n")
-
     # Pending moderation
     # Get 'message_id' from the 'accepted' and 'rejected' files
     ready_ids = set(data_accepted["message_id"]).union(data_rejected["message_id"])
     data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]
-
-    # Adding spam messages
-    with open(log_spam_file) as f:
-        for line in f.readlines():
-            d_spam_messages.add(line.strip())
-    print(d_spam_messages)
 
     # Removing the help command
     bot.remove_command("help")
