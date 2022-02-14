@@ -1,3 +1,4 @@
+import re
 import sys
 import toml
 import time
@@ -26,8 +27,20 @@ bot = commands.Bot(command_prefix="%", intents=intents)
 # For flood protection
 d_messages = {}
 
+# For spam list of messages
+d_spam_messages = set()
+
 # Global instance of the server
 guild = None
+
+FLOOD_LIMIT = 3
+MENTIONS_LIMIT = 3
+
+def add_spam_message(message):
+    global d_spam_messages
+    with open(log_spam_file, "a") as f:
+        f.write(f"{message}\n")
+    d_spam_messages.add(message)
 
 
 def get_moderation_channel(current_id):
@@ -333,7 +346,7 @@ async def flood_check(message):
             main_mod_channel = bot.get_channel(MOD_MAIN)
 
         _channel = bot.get_channel(message.channel.id)
-        _content = message.content.strip()
+        _content = strip_message(message.content.strip())
         _author = message.author
 
         if _author not in d_messages:
@@ -343,38 +356,10 @@ async def flood_check(message):
                 d_messages[_author][_content] = 1
             else:
                 d_messages[_author][_content] += 1
-                if d_messages[_author][_content] >= 3:
+                if d_messages[_author][_content] >= FLOOD_LIMIT:
 
-                    if not guild:
-                        guild = bot.get_guild(GUILD)
-                    coord_role = discord.utils.get(guild.roles, name=MOD_ROLE)
-                    msg = (
-                        f"{coord_role.mention} Se detectaton mensajes repetitivos de "
-                        f"{message.author.mention} y se ha muteado."
-                    )
-                    e = discord.Embed(
-                        title="\N{NO ENTRY} Alerta de Flood",
-                        description=msg,
-                        colour=0x2B597B,
-                    )
-                    e.add_field(name="Mensaje", value=f"{_content}", inline=False)
-                    e.add_field(
-                        name="En caso de ser spam",
-                        value=(
-                            "Recuerda banear al usuario haciendo click derecho sobre su "
-                            "nick y seleccionando la opción 'Ban'"
-                        ),
-                        inline=False,
-                    )
-                    e.add_field(
-                        name="En caso de ser un error",
-                        value=(
-                            'Remueve el rol "Muted" haciendo click derecho en el nick, '
-                            'luego "Roles" y deselecciona el rol "Muted".'
-                        ),
-                        inline=False,
-                    )
-                    await main_mod_channel.send(embed=e)
+                    add_spam_message(strip_message(_content))
+                    await alert_moderation(main_mod_channel, _author, _content, "Alerta de Flood", "flood")
 
                     # Set muted role
                     role = discord.utils.get(_author.guild.roles, name=MUTED_ROLE)
@@ -389,17 +374,156 @@ async def flood_check(message):
                         f"El equipo de coordinación ha sido notificado."
                     )
         pprint(d_messages)
-        print("\n\n")
+
+async def alert_moderation(channel, author, content, title, reason):
+    global main_mod_channel, guild
+
+    if not guild:
+        guild = bot.get_guild(GUILD)
+
+    coord_role = discord.utils.get(guild.roles, name=MOD_ROLE)
+    d_msg = {
+        "menciones": f"{coord_role.mention} Se detectó un mensaje con muchas menciones de {author.mention} y se ha muteado.",
+        "flood": f"{coord_role.mention} Se detectaton mensajes repetitivos de {author.mention} y se ha muteado.",
+        "known": f"{coord_role.mention} Se detectó un mensaje previamente reconocido como spam de {author.mention} y se ha muteado.",
+    }
+    msg = d_msg[reason]
+    e = discord.Embed(
+        title=f"\N{NO ENTRY} {title}",
+        description=msg,
+        colour=0x2B597B,
+    )
+    e.add_field(name="Mensaje", value=f"{content}", inline=False)
+    e.add_field(
+        name="En caso de ser spam",
+        value=(
+            "Recuerda banear al usuario haciendo click derecho sobre su "
+            "nick y seleccionando la opción 'Ban'"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="En caso de ser un error",
+        value=(
+            'Remueve el rol "Muted" haciendo click derecho en el nick, '
+            'luego "Roles" y deselecciona el rol "Muted".'
+        ),
+        inline=False,
+    )
+    await channel.send(embed=e)
+
+async def mention_check(message):
+    global main_mod_channel, guild
+
+    if message.author.id != BOT_ID:
+        if not main_mod_channel:
+            main_mod_channel = bot.get_channel(MOD_MAIN)
+
+        # Skip if 2 mentions or less
+        if len(message.mentions) + len(message.role_mentions) < MENTIONS_LIMIT:
+            return False
+
+        _channel = bot.get_channel(message.channel.id)
+        _content = message.content.strip()
+        _author = message.author
+
+        await alert_moderation(main_mod_channel, _author, _content, "Alerta de Flood (Menciones)", "menciones")
+
+        # Set muted role
+        role = discord.utils.get(_author.guild.roles, name=MUTED_ROLE)
+        await _author.add_roles(role)
+
+        # Send message notifying the user is muted
+        await _channel.send(
+            f"Usuario {_author.mention} silenciado por hacer muchas menciones. "
+            f"El equipo de coordinación ha sido notificado."
+        )
+        return True
+
+def strip_message(message):
+    m = message[:]
+
+    # Remove newlines, and tabs
+    ft = (
+        ("\n", " "),
+        ("\r", " "),
+        ("\t", " "),
+    )
+    for f, t in ft:
+        m = m.replace(f, t)
+
+    # Remove mentions
+    m = re.sub("<@[^>]*>", "",  m)
+
+    # Remove multiple whitepaces
+    m = re.sub("\ +", " ",  m)
+
+    return m.strip()
+
+def main_log(message):
+    with open(log_main_file, "a") as f:
+        date_str = f"{datetime.now()}"
+        line = (
+            f'"{date_str}";'
+            f'"{message.id}";'
+            f'"{message.channel}";'
+            f'"{message.author.id}";'
+            f'"{message.author}";'
+            f'"{message.content}"\n'
+        )
+        f.write(line)
 
 
 @bot.event
 async def on_message(message):
-    global data_mod
+    global main_mod_channel, data_mod, d_spam_messages
     await bot.process_commands(message)
 
-    user_roles = message.author.roles
+    if message.author.id == BOT_ID:
+        return
 
-    if len(user_roles) == 1 and await spam_check(message):
+    main_log(message)
+    user_roles = message.author.roles
+    clean_message = strip_message(message.content)
+
+    if clean_message in d_spam_messages:
+        if not main_mod_channel:
+            main_mod_channel = bot.get_channel(MOD_MAIN)
+        await alert_moderation(main_mod_channel, message.author, clean_message, "Alerta de SPAM (Mensaje conocido)", "known")
+
+        # Set muted role
+        role = discord.utils.get(message.author.guild.roles, name=MUTED_ROLE)
+        await message.author.add_roles(role)
+
+        await discord.Message.delete(message)
+        channel = bot.get_channel(message.channel.id)
+        msg = (
+            f"El mensaje del usuario {message.author.mention} fue borrado por ser un mensaje detectado previamente como spam.\n"
+        )
+        embed = discord.Embed(
+            title="\N{NO ENTRY} Alerta de posible SPAM",
+            description=msg,
+            colour=0x2B597B,
+        )
+        reply_msg = await channel.send(embed=embed)
+
+    # Check first more than 3 mentions
+    if await mention_check(message):
+        add_spam_message(clean_message)
+        await discord.Message.delete(message)
+        channel = bot.get_channel(message.channel.id)
+        msg = (
+            f"El mensaje del usuario {message.author.mention} fue borrado por tener muchas menciones y podría ser un engaño.\n"
+            "Evita `hacer click` en enlaces de **usuarios que no conozcas**."
+        )
+        embed = discord.Embed(
+            title="\N{NO ENTRY} Alerta de posible SPAM",
+            description=msg,
+            colour=0x2B597B,
+        )
+        reply_msg = await channel.send(embed=embed)
+    elif len(user_roles) == 1 and await spam_check(message):
+        add_spam_message(clean_message)
         await discord.Message.delete(message)
         channel = bot.get_channel(message.channel.id)
         msg = (
@@ -600,6 +724,8 @@ if __name__ == "__main__":
 
     log_file = Path(LOG_FILE)
     log_mod_file = Path(LOG_MOD_FILE)
+    log_spam_file = Path("spam_log.csv")
+    log_main_file = Path("main_log.csv")
 
     # create an '_accepted' file based on the moderation log file
     LOG_MOD_ACCEPTED_FILE = f"{log_mod_file.stem}_accepted{log_mod_file.suffix}"
@@ -633,11 +759,25 @@ if __name__ == "__main__":
             f.write("date;message_id;channel;author_id;author;message;moderator;reason\n")
     data_rejected = pd.read_csv(str(log_rejected_file), sep=";", dtype=str)
 
+    if not log_spam_file.is_file():
+        with open(str(log_spam_file), "w") as f:
+            f.write("\n")
+
+    if not log_main_file.is_file():
+        with open(str(log_main_file), "w") as f:
+            f.write("date;command;message_id;channel;author_id;author;message\n")
+
     # Pending moderation
     # Get 'message_id' from the 'accepted' and 'rejected' files
     ready_ids = set(data_accepted["message_id"]).union(data_rejected["message_id"])
 
     data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]
+
+    # Adding spam messages
+    with open(log_spam_file) as f:
+        for line in f.readlines():
+            d_spam_messages.add(line.strip())
+    print(d_spam_messages)
 
     # Removing the help command
     bot.remove_command("help")

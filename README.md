@@ -66,6 +66,18 @@ comandos:
  * `%mod ID` mostrar información sobre el anuncio ID.
  * `%limpia N` para borrar N líneas del canal.
 
+## Moderación automática
+
+En los siguientes casos, el bot silenciará a las personas que rompan
+unas de las siguientes reglas:
+
+* **Spam**: Personas que envien mensajes de *phishing* con palabras como
+  'discord', 'free', 'nitro', etc.
+* **Flood**: Personas que envien el mismo mensaje en menos de una hora,
+  por 3 veces o más.
+* **Menciones**: Personas que envían mensajes con 3 menciones o más
+  a roles o personas.
+
 ## Tengo una idea para el bot
 
 Las futuras ideas del bot están definidas como 'Issues' en este repositorio.
