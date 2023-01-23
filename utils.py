@@ -1,7 +1,15 @@
+import re
 import discord
-import base64
 from datetime import datetime
 
+from configuration import Config
+
+config = Config()
+
+
+def get_moderation_channel(bot, channel_id):
+    channel_mod = bot.get_channel(channel_id)
+    return channel_mod
 
 
 def get_message_to_moderate(message):
@@ -23,3 +31,24 @@ def get_message_to_moderate(message):
     )
 
     return embed
+
+
+def strip_message(message):
+    m = message[:].lower()
+
+    # Remove newlines, and tabs
+    ft = (
+        ("\n", " "),
+        ("\r", " "),
+        ("\t", " "),
+    )
+    for f, t in ft:
+        m = m.replace(f, t)
+
+    # Remove mentions
+    m = re.sub("<@[^>]*>", "", m)
+
+    # Remove multiple whitepaces
+    m = re.sub(r"\ +", " ", m)
+
+    return m.strip()

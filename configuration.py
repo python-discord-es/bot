@@ -4,9 +4,19 @@ import toml
 from pathlib import Path
 
 
-class Config:
+class Singleton(type):
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+
+class Config(metaclass=Singleton):
     def __init__(self):
         # Configuration file
+        print("Config __init__")
         config = None
         with open("config.toml") as f:
             config = toml.loads(f.read())
@@ -30,6 +40,8 @@ class Config:
         self.FLOOD_LIMIT = 3
         self.MENTIONS_LIMIT = 3
 
+        self.setup_log_files()
+
     def setup_log_files(self):
         self.log_file = Path(self.LOG_FILE)
         self.log_mod_file = Path(self.LOG_MOD_FILE)
@@ -52,7 +64,8 @@ class Config:
             self.log_mod_file, "date;message_id;channel;author_id;author;message\n"
         )
         self.check_create_file(
-            self.log_accepted_file, "date;message_id;channel;author_id;author;message;moderator\n"
+            self.log_accepted_file,
+            "date;message_id;channel;author_id;author;message;moderator\n",
         )
         self.check_create_file(
             self.log_rejected_file,
@@ -60,7 +73,8 @@ class Config:
         )
         self.check_create_file(self.log_spam_file, "\n")
         self.check_create_file(
-            self.log_main_file, "date;command;message_id;channel;author_id;author;message\n"
+            self.log_main_file,
+            "date;command;message_id;channel;author_id;author;message\n",
         )
 
     def get_spam_messages(self):
@@ -68,7 +82,9 @@ class Config:
         d = set()
         with open(self.log_spam_file) as f:
             for line in f.readlines():
+                print(">>>", line.strip())
                 d.add(line.strip())
+        print("LOG: get_spam_messages", d)
         return d
 
     def check_create_file(self, fname: Path, msg: str) -> None:

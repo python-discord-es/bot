@@ -1,4 +1,10 @@
+import discord
 from discord.ext import commands
+
+from configuration import Config
+from utils import get_moderation_channel
+
+config = Config()
 
 
 class Ayuda(commands.Cog):
@@ -7,14 +13,13 @@ class Ayuda(commands.Cog):
 
     @commands.command(name="ayuda", help="Comando de ayuda", pass_context=True)
     async def mensaje_ayuda(self, ctx):
-
         # Skip if it's the bot
         if ctx.author.id == config.BOT_ID:
             return
 
         # Check which channel combination we are using from the
         # configuration information
-        channel_mod = get_moderation_channel(ctx.channel.id)
+        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
 
         if channel_mod:
             e = self.get_mod_help()
@@ -29,7 +34,9 @@ class Ayuda(commands.Cog):
             colour=0x2B597B,
         )
         embed.add_field(
-            name="`%mod`", value="Lista todos los post pendientes de moderación", inline=False
+            name="`%mod`",
+            value="Lista todos los post pendientes de moderación",
+            inline=False,
         )
         embed.add_field(
             name="`%mod ID`",
@@ -37,7 +44,9 @@ class Ayuda(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="`%aceptar ID`", value="Acepta mensaje, lo envia al canal asociado", inline=False
+            name="`%aceptar ID`",
+            value="Acepta mensaje, lo envia al canal asociado",
+            inline=False,
         )
         embed.add_field(
             name="`%rechazar ID RAZON`",
@@ -48,7 +57,9 @@ class Ayuda(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="`%limpia`", value="Limpia N mensajes del canal de moderación", inline=False
+            name="`%limpia`",
+            value="Limpia N mensajes del canal de moderación",
+            inline=False,
         )
         return embed
 
@@ -59,7 +70,9 @@ class Ayuda(commands.Cog):
         )
         embed.add_field(
             name='`%encuesta "pregunta"`',
-            value=("Para hacer preguntas de Sí y No.\n" 'Ejemplo:\n `%encuesta "¿Te gusta el té?"`'),
+            value=(
+                "Para hacer preguntas de Sí y No.\n" 'Ejemplo:\n `%encuesta "¿Te gusta el té?"`'
+            ),
             inline=False,
         )
         embed.add_field(
@@ -70,6 +83,7 @@ class Ayuda(commands.Cog):
             ),
             inline=False,
         )
-        embed.set_footer(text='Importante: La pregunta y opciones deben ir entre comillas dobles "..."')
+        embed.set_footer(
+            text='Importante: La pregunta y opciones deben ir entre comillas dobles "..."'
+        )
         return embed
-

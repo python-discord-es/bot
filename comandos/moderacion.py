@@ -1,246 +1,111 @@
+import asyncio
 import base64
-
-import discord
 from datetime import datetime
+
+import pandas as pd
+import discord
 from discord.ext import commands
 
+from configuration import Config
+from utils import get_moderation_channel, get_message_to_moderate
+
+config = Config()
+
+
 class Moderacion(commands.Cog):
-    def __init__(self, bot, log_rejected_file, log_accepted_file):
+    def __init__(self, bot):
         self.bot = bot
-        self.log_rejected_file = log_rejected_file
-        self.log_accepted_file = log_accepted_file
 
-    @bot.command(
-        name="rechazar", help="Comando para rechazar mensajes en moderación", pass_context=True
-    )
-    @commands.has_role(config.MOD_ROLE)
-    async def rechazar_mensaje(self, ctx):
-        global data_mod
+        self._msg_content = None
+        self._msg_author = None
+        self._msg_id = None
+        self._msg_enc = None
 
-        # Skip if it's the bot
-        if ctx.author.id == config.BOT_ID:
-            return
+        self.channels = {}
 
-        # Check which channel combination we are using from the
-        # configuration information
-        channel_mod = get_moderation_channel(ctx.channel.id)
+    def get_channels_main_mod_sub(self, channel_id):
+        channel_main = self.bot.get_channel(self.channels[channel_id]["main"])
+        channel_mod = self.bot.get_channel(self.channels[channel_id]["mod"])
+        channel_sub = self.bot.get_channel(channel_id)
 
-        if channel_mod:
-            _post = ctx.message.content.replace("%rechazar", "").strip().split()
-            _post_id = _post[0]
-            _post_reason = " ".join(_post[1:])
-            post_id = None
-            try:
-                post_id = int(_post_id)
-            except ValueError:
-                await channel_mod.send(f"ID incorrecto '{_post_id}', sólo utiliza números.")
+        return channel_main, channel_mod, channel_sub
 
-            post_id = str(post_id)
+    def log_on_message(self, channel_sub):
+        # Log
+        # Add the new row to the data_mod, to have it in runtime
+        # Add the new entry to the dat_mod file, to have it for the next time
+        with open(str(config.log_mod_file), "a") as f:
+            # date;message_id;channel;author;message
+            date_str = f"{datetime.now()}"
+            line = (
+                f'"{date_str}";'
+                f'"{self._msg_id}";'
+                f'"{channel_sub}";'
+                f'"{self._msg_author.id}";'
+                f'"{self._msg_author}";'
+                f'"{self._msg_enc}"\n'
+            )
 
-            if post_id:
-                if post_id in data_mod["message_id"].to_list():
+            # dictionary to add the data to the runtime DataFrame
+            new_data = {
+                "date": date_str,
+                "message_id": f"{self._msg_id}",
+                "channel": f"{channel_sub}",
+                "author_id": f"{self._msg_author.id}",
+                "author": f"{self._msg_author}",
+                "message": f"{self._msg_enc}",
+            }
+            self.bot.data_mod = pd.concat([self.bot.data_mod, pd.DataFrame([new_data])])
 
-                    # Sacar datos de df moderación
-                    condition = data_mod["message_id"] == post_id
-                    mod_row = data_mod[condition]
+            # Writing data to the CSV file
+            f.write(line)
 
-                    channel_mod = None
-                    channel_ann = None
-                    send_channel = discord.utils.get(
-                        ctx.guild.channels, name=mod_row["channel"].values[0]
-                    )
-                    for channel, values in config.CHANNELS.items():
-                        if send_channel.id == values["submission"]:
-                            channel_mod = bot.get_channel(values["moderation"])
-                            channel_ann = bot.get_channel(values["main"])
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if not self.channels:
+            for channel, values in config.CHANNELS.items():
+                if values["submission"] not in self.channels:
+                    self.channels[values["submission"]] = {
+                        "mod": values["moderation"],
+                        "main": values["main"],
+                    }
 
-                    # Log
-                    with open(str(self.log_rejected_file), "a") as f:
+    def log_aceptar(self, row, post_id, author):
+        # Log
+        with open(str(config.log_accepted_file), "a") as f:
+            # f.write("date;message_id;channel;author;message;moderator\n")
+            # date;message_id;channel;author;message
+            date_str = f"{datetime.now()}"
+            line = (
+                f'"{date_str}";'
+                f'"{post_id}";'
+                f'"{row["channel"].values[0]}";'
+                f'"{row["author_id"].values[0]}";'
+                f'"{row["author"].values[0]}";'
+                f'"{row["message"].values[0]}";'
+                f'"{author}"\n'
+            )
+            # Writing data to the CSV file
+            f.write(line)
 
-                        date_str = f"{datetime.now()}"
-                        line = (
-                            f'"{date_str}";'
-                            f'"{post_id}";'
-                            f'"{mod_row["channel"].values[0]}";'
-                            f'"{mod_row["author_id"].values[0]}";'
-                            f'"{mod_row["author"].values[0]}";'
-                            f'"{mod_row["message"].values[0]}";'
-                            f'"{ctx.message.author}";'
-                            f'"{_post_reason}"\n'
-                        )
-                        # Writing data to the CSV file
-                        f.write(line)
+    def log_rechazar(self, row, post_id, author, reason):
+        # Log
+        with open(str(config.log_rejected_file), "a") as f:
+            date_str = f"{datetime.now()}"
+            line = (
+                f'"{date_str}";'
+                f'"{post_id}";'
+                f'"{row["channel"].values[0]}";'
+                f'"{row["author_id"].values[0]}";'
+                f'"{row["author"].values[0]}";'
+                f'"{row["message"].values[0]}";'
+                f'"{author}";'
+                f'"{reason}"\n'
+            )
+            # Writing data to the CSV file
+            f.write(line)
 
-                    _author_id = mod_row["author_id"].values[0]
-                    author = bot.get_user(int(_author_id))
-
-                    message_answer = (
-                        f"{author.mention} tu mensaje necesita atención: "
-                        f'"{_post_reason}".\n'
-                        f"Puedes re-enviarlo con la información faltante."
-                    )
-
-                    # Remove that entry from the moderation DataFrame
-                    data_mod = data_mod[~condition]
-
-                    await channel_mod.send(
-                        f"Mensaje {post_id} rechazado, "
-                        f"enviada respuesta al canal {channel_ann.mention}"
-                    )
-                    await channel_ann.send(message_answer)
-                else:
-                    await channel_mod.send(f"El ID {post_id} no fue encontrado")
-
-
-
-
-    # This command can only be used within the "moderation" channels
-    # described in the configuration file.
-    @commands.command(name="aceptar", help="Comando para aceptar mensajes en moderación", pass_context=True)
-    @commands.has_role(config.MOD_ROLE)
-    async def aceptar_mensaje(self, ctx):
-        global data_mod
-
-        # Skip if it's the bot
-        if ctx.author.id == config.BOT_ID:
-            return
-
-        # Check which channel combination we are using from the
-        # configuration information
-        channel_mod = get_moderation_channel(ctx.channel.id)
-
-        if channel_mod:
-            _post = ctx.message.content.replace("%aceptar", "").strip()
-            post_id = None
-            try:
-                post_id = int(_post)
-            except ValueError:
-                await channel_mod.send(f"ID incorrecto: '{_post}', sólo utiliza números.")
-
-            post_id = str(post_id)
-
-            if post_id:
-                if post_id in data_mod["message_id"].to_list():
-
-                    # Sacar datos de df moderación
-                    condition = data_mod["message_id"] == post_id
-                    mod_row = data_mod[condition]
-
-                    channel_mod = None
-                    channel_ann = None
-                    send_channel = discord.utils.get(
-                        ctx.guild.channels, name=mod_row["channel"].values[0]
-                    )
-                    for channel, values in config.CHANNELS.items():
-                        if send_channel.id == values["submission"]:
-                            channel_mod = bot.get_channel(values["moderation"])
-                            channel_ann = bot.get_channel(values["main"])
-
-                    # Log
-                    with open(str(self.log_accepted_file), "a") as f:
-                        # f.write("date;message_id;channel;author;message;moderator\n")
-                        # date;message_id;channel;author;message
-
-                        date_str = f"{datetime.now()}"
-                        line = (
-                            f'"{date_str}";'
-                            f'"{post_id}";'
-                            f'"{mod_row["channel"].values[0]}";'
-                            f'"{mod_row["author_id"].values[0]}";'
-                            f'"{mod_row["author"].values[0]}";'
-                            f'"{mod_row["message"].values[0]}";'
-                            f'"{ctx.message.author}"\n'
-                        )
-                        # Writing data to the CSV file
-                        f.write(line)
-
-                    message_dec = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
-                    _author_id = mod_row["author_id"].values[0]
-                    author = bot.get_user(int(_author_id))
-                    data_mod = data_mod[~condition]
-
-                    await channel_mod.send(
-                        f"Mensaje {post_id} aceptado, enviado al canal {channel_ann.mention}"
-                    )
-                    await channel_ann.send(f"Enviado por {author.mention}\n{message_dec}")
-                else:
-                    await channel_mod.send(f"El ID {post_id} no fue encontrado")
-
-
-    @commands.command(name="mod", help="Comando para listar los mensajes pendientes", pass_context=True)
-    @commands.has_role(config.MOD_ROLE)
-    async def mostrar_mensajes(self, ctx):
-        global data_mod
-
-        # Skip if it's the bot
-        if ctx.author.id == config.BOT_ID:
-            return
-
-        # Check which channel combination we are using from the
-        # configuration information
-        channel_mod = get_moderation_channel(ctx.channel.id)
-
-        if channel_mod:
-            _post = ctx.message.content.replace("%mod", "").strip().split()
-            # We have a message_id
-            if len(_post) > 0:
-                _post_id = _post[0]
-                post_id = None
-                try:
-                    post_id = int(_post_id)
-                except ValueError:
-                    await channel_mod.send(f"ID incorrecto '{_post}', sólo utiliza números.")
-                post_id = str(post_id)
-                if post_id:
-                    if post_id in data_mod["message_id"].to_list():
-
-                        # Sacar datos de df moderación
-                        condition = data_mod["message_id"] == post_id
-                        mod_row = data_mod[condition]
-
-                        m_date = mod_row["date"].values[0]
-                        m_message_id = mod_row["message_id"].values[0]
-                        m_message = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
-                        m_author_id = mod_row["author_id"].values[0]
-
-                        author = bot.get_user(int(m_author_id))
-
-                        msg = (
-                            f"Post de {author.mention} el {m_date}\n"
-                            f"**ID:** {m_message_id}\n"
-                            f"**Mensaje:**\n"
-                            f"```\n{m_message}\n```\n"
-                        )
-                        embed = discord.Embed(
-                            title="Mensaje pendiente de moderación",
-                            description=msg,
-                            colour=0x2B597B,
-                        )
-                        await channel_mod.send(embed=embed)
-                    else:
-                        await channel_mod.send(f"ID no encontrado: {post_id}")
-            else:
-                e = get_mod_pending(data_mod, bot)
-                await channel_mod.send(embed=e)
-
-    @commands.command(name="limpia", help="Comando para limpiar historial de moderación", pass_context=True)
-    @commands.has_role(config.MOD_ROLE)
-    async def limpia(ctx, number):
-
-        # Skip if it's the bot
-        if ctx.author.id == config.BOT_ID:
-            return
-
-        # Check which channel combination we are using from the
-        # configuration information
-        channel_mod = get_moderation_channel(ctx.channel.id)
-
-        # We add one to include the current message with the instruction
-        number = int(number) + 1
-        if channel_mod:
-            await ctx.channel.purge(limit=number)
-
-    def get_mod_pending(self, data, bot):
+    def get_mod_pending(self, data):
         # Imprimir todos los posts que necesitan moderación
         messages = False
 
@@ -254,12 +119,14 @@ class Moderacion(commands.Cog):
             m_message_id = mod_row["message_id"]
             m_message = base64.b64decode(eval(mod_row["message"])).decode("utf-8")
             m_author_id = mod_row["author_id"]
-            author = bot.get_user(int(m_author_id))
+            author = self.bot.get_user(int(m_author_id))
 
             if author:
                 embed.add_field(
-                    name=f"`{m_message_id}`",
-                    value=(f"{m_message[:30]}...\n" f"Fecha: `{m_date}`\n" f"Autor: {author.mention}"),
+                    name=f"ID: `{m_message_id}`",
+                    value=(
+                        f"{m_message[:30]}...\n" f"Fecha: `{m_date}`\n" f"Autor: {author.mention}"
+                    ),
                     inline=False,
                 )
                 if not messages:
@@ -272,3 +139,223 @@ class Moderacion(commands.Cog):
 
         return embed
 
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        print("LOG: MensajeModeracion.on_message")
+
+        # Skip limpia command
+        if message.content.startswith("%limpia"):
+            return
+        # Not the same bot
+        if message.author.id == config.BOT_ID:
+            return
+        # Only submissions channels will continue
+        ch_id = message.channel.id
+        if ch_id not in self.channels:
+            return
+
+        # Setup object values
+        self._msg_id = message.id
+        self._msg_content = message.content
+        self._msg_author = message.author
+        self._msg_enc = base64.b64encode(message.content.encode("utf-8"))
+
+        ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(ch_id)
+
+        self.log_on_message(ch_sub)
+
+        embed = discord.Embed(
+            title="Mensaje Enviado",
+            description=f"Gracias {self._msg_author.mention}, tu mensaje espera moderación.",
+            colour=0x2B597B,
+        )
+
+        reply_msg = await ch_sub.send(embed=embed)
+
+        embed = get_message_to_moderate(message)
+        await ch_mod.send(embed=embed)
+
+        # Remove messages
+        await asyncio.sleep(3)
+        await discord.Message.delete(message)
+
+        await asyncio.sleep(3)
+        await discord.Message.delete(reply_msg)
+
+    @commands.command(
+        name="rechazar",
+        help="Comando para rechazar mensajes en moderación",
+        pass_context=True,
+    )
+    @commands.has_role(config.MOD_ROLE)
+    async def rechazar_mensaje(self, ctx):
+        # Skip if it's the bot
+        if ctx.author.id == config.BOT_ID:
+            return
+
+        # Check which channel combination we are using from the
+        # configuration information
+        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+
+        if channel_mod.id != ctx.message.channel.id:
+            return
+
+        _post = ctx.message.content.replace("%rechazar", "").strip()
+        _post_id = _post.split()[0]
+        _post_reason = " ".join(_post.split()[1:])
+        post_id = None
+        try:
+            post_id = str(int(_post_id))
+        except ValueError:
+            await channel_mod.send(f"ID incorrecto: '{_post_id}', sólo utiliza números.")
+            return
+
+        if post_id not in set(self.bot.data_mod["message_id"]):
+            await channel_mod.send(f"El ID {post_id} no fue encontrado")
+            return
+
+        # Sacar datos de df moderación
+        condition = self.bot.data_mod["message_id"] == post_id
+        mod_row = self.bot.data_mod[condition]
+
+        # Get the submission channel id from the file
+        channel_id = config.CHANNELS[mod_row["channel"].values[0].replace("envio-", "")][
+            "submission"
+        ]
+        ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
+
+        self.log_rechazar(mod_row, post_id, ctx.message.author, _post_reason)
+
+        message_dec = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
+
+        author = self.bot.get_user(int(mod_row["author_id"].values[0]))
+
+        # Remove that row, because it was handled
+        self.bot.data_mod = self.bot.data_mod[~condition]
+
+        embed = discord.Embed(
+            title="Mensaje rechazado",
+            description=f"{author.mention} tu mensaje necesita atención.",
+            colour=0x2B597B,
+        )
+        embed.add_field(
+            name="Razón rechazado",
+            value=f"{_post_reason}.\nPuedes re-enviarlo con la información faltante.",
+            inline=False,
+        )
+        embed.add_field(name="Mensaje original", value=message_dec, inline=False)
+
+        await ch_mod.send(f"Mensaje {post_id} rechazado, " f"enviada respuesta a {ch_main.mention}")
+        await ch_sub.send(embed=embed)
+
+    # This command can only be used within the "moderation" channels
+    # described in the configuration file.
+    @commands.command(
+        name="aceptar",
+        help="Comando para aceptar mensajes en moderación",
+        pass_context=True,
+    )
+    @commands.has_role(config.MOD_ROLE)
+    async def aceptar_mensaje(self, ctx):
+        # Skip if it's the bot
+        if ctx.author.id == config.BOT_ID:
+            return
+
+        # Check which channel combination we are using from the
+        # configuration information
+        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+
+        if channel_mod.id != ctx.message.channel.id:
+            return
+
+        _post = ctx.message.content.replace("%aceptar", "").strip()
+        post_id = None
+        try:
+            post_id = str(int(_post))
+        except ValueError:
+            await channel_mod.send(f"ID incorrecto: '{_post}', sólo utiliza números.")
+            return
+
+        if post_id not in set(self.bot.data_mod["message_id"]):
+            await channel_mod.send(f"El ID {post_id} no fue encontrado")
+            return
+
+        # Sacar datos de df moderación
+        condition = self.bot.data_mod["message_id"] == post_id
+        mod_row = self.bot.data_mod[condition]
+
+        # Get the submission channel id from the file
+        channel_id = config.CHANNELS[mod_row["channel"].values[0].replace("envio-", "")][
+            "submission"
+        ]
+        ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
+
+        self.log_aceptar(mod_row, post_id, ctx.message.author)
+
+        message_dec = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
+        author = self.bot.get_user(int(mod_row["author_id"].values[0]))
+
+        # Remove that row, because it was handled
+        self.bot.data_mod = self.bot.data_mod[~condition]
+
+        await ch_mod.send(f"Mensaje {post_id} aceptado, enviado al canal {ch_main.mention}")
+        await ch_main.send(f"[Enviado por {author.mention}]\n{message_dec}")
+
+    @commands.command(
+        name="mod",
+        help="Comando para listar los mensajes pendientes",
+        pass_context=True,
+    )
+    @commands.has_role(config.MOD_ROLE)
+    async def mostrar_mensajes(self, ctx):
+        # Skip if it's the bot
+        if ctx.author.id == config.BOT_ID:
+            return
+
+        # Check which channel combination we are using from the
+        # configuration information
+        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+
+        if channel_mod.id != ctx.message.channel.id:
+            return
+
+        _post = ctx.message.content.replace("%mod", "").strip().split()
+        # We have no message_id
+        if len(_post) < 1:
+            e = self.get_mod_pending(self.bot.data_mod)
+            await channel_mod.send(embed=e)
+
+        _post_id = _post[0]
+        post_id = None
+        try:
+            post_id = str(int(_post_id))
+        except ValueError:
+            await channel_mod.send(f"ID incorrecto '{_post}', sólo utiliza números.")
+
+        if post_id:
+            if post_id in self.bot.data_mod["message_id"].to_list():
+                # Sacar datos de df moderación
+                condition = self.bot.data_mod["message_id"] == post_id
+                mod_row = self.bot.data_mod[condition]
+
+                m_date = mod_row["date"].values[0]
+                m_message_id = mod_row["message_id"].values[0]
+                m_message = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
+                m_author_id = mod_row["author_id"].values[0]
+
+                author = self.bot.get_user(int(m_author_id))
+
+                msg = (
+                    f"Post de {author.mention} el {m_date}\n"
+                    f"**ID:** {m_message_id}\n"
+                    f"**Mensaje:**\n"
+                    f"```\n{m_message}\n```\n"
+                )
+                embed = discord.Embed(
+                    title="Mensaje pendiente de moderación",
+                    description=msg,
+                    colour=0x2B597B,
+                )
+                await channel_mod.send(embed=embed)
+            else:
+                await channel_mod.send(f"ID no encontrado: {post_id}")
