@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List
 
 from configuration import Config
+from messages import Messages
 
 from utils import get_message_to_moderate
 
@@ -20,14 +21,9 @@ bot = commands.Bot(command_prefix="%", intents=intents)
 config = Config()
 config.setup_log_files()
 
-# For spam list of messages
-d_spam_messages = config.get_spam_messages()
-
-# For flood protection
-d_messages = {}
-
-# For spam list of messages
-d_spam_messages = set()
+messages = Messages()
+messages.spam = config.get_spam_messages()
+messages.normal = {}
 
 # Global instance of the server
 guild = None
@@ -36,10 +32,10 @@ FLOOD_LIMIT = 3
 MENTIONS_LIMIT = 3
 
 def add_spam_message(message):
-    global d_spam_messages
+    global messages.spam
     with open(config.log_spam_file, "a") as f:
         f.write(f"{message}\n")
-    d_spam_messages.add(message)
+    messages.spam.add(message)
 
 
 def get_moderation_channel(current_id):
@@ -91,7 +87,7 @@ async def spam_check(message):
 
 
 async def flood_check(message):
-    global main_mod_channel, d_messages, guild
+    global main_mod_channel, messages.normal, guild
 
     if message.author.id != config.BOT_ID:
         if not main_mod_channel:
@@ -101,14 +97,14 @@ async def flood_check(message):
         _content = strip_message(message.content.strip())
         _author = message.author
 
-        if _author not in d_messages:
-            d_messages[_author] = {_content: 1}
+        if _author not in messages.normal:
+            messages.normal[_author] = {_content: 1}
         else:
-            if _content not in d_messages[_author]:
-                d_messages[_author][_content] = 1
+            if _content not in messages.normal[_author]:
+                messages.normal[_author][_content] = 1
             else:
-                d_messages[_author][_content] += 1
-                if d_messages[_author][_content] >= config.FLOOD_LIMIT:
+                messages.normal[_author][_content] += 1
+                if messages.normal[_author][_content] >= config.FLOOD_LIMIT:
 
                     add_spam_message(strip_message(_content))
                     await alert_moderation(
@@ -120,7 +116,7 @@ async def flood_check(message):
                     await _author.add_roles(role)
 
                     # Reset author counters
-                    d_messages[_author] = {}
+                    messages.normal[_author] = {}
 
                     # Send message notifying the user is muted
                     await _channel.send(
@@ -235,7 +231,7 @@ def main_log(message):
 
 @bot.event
 async def on_message(message):
-    global main_mod_channel, data_mod, d_spam_messages
+    global main_mod_channel, data_mod, messages.spam
     await bot.process_commands(message)
 
     if message.author.id == config.BOT_ID:
@@ -245,7 +241,7 @@ async def on_message(message):
     user_roles = message.author.roles
     clean_message = strip_message(message.content)
 
-    if clean_message in d_spam_messages:
+    if clean_message in messages.spam:
         if not main_mod_channel:
             main_mod_channel = bot.get_channel(config.MOD_MAIN)
         await alert_moderation(
@@ -399,8 +395,8 @@ async def on_ready():
 # Remove messages every hour
 @tasks.loop(seconds=60 * 60)
 async def clear_messages():
-    global d_messages
-    d_messages = {}
+    global messages.normal
+    messages.normal = {}
 
 
 @bot.event
