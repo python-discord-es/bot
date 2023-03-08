@@ -1,0 +1,3 @@
+*.csv
+config.toml
+__pycache__
