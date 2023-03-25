@@ -73,6 +73,9 @@ class FloodSpam(commands.Cog):
         if message.author.bot or message.author.id == config.BOT_ID:
             return
 
+        if len(message.content) < 5:
+            return
+
         print("LOG: setting data from message")
         self._msg_channel = self.bot.get_channel(message.channel.id)
         self._msg_content = strip_message(message.content)
