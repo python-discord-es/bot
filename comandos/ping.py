@@ -12,9 +12,13 @@ class Ping(commands.Cog):
     async def pingpong(self, ctx: commands.Context):
         await ctx.send("pong", ephemeral=True)
 
+    def has_global_mention(self, m):
+        _roles = ("everyone", "here")
+        return any(r in m.content for r in _roles)
+
     @commands.Cog.listener()
     async def on_message(self, message):
-        if self.bot.user.mentioned_in(message):
+        if self.bot.user.mentioned_in(message) and not self.has_global_mention(message):
             picture = None
             with open("resources/llama.gif", "rb") as f:
                 picture = discord.File(f)
