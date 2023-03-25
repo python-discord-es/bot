@@ -25,20 +25,28 @@ class Config(metaclass=Singleton):
             print("Error: Failed to load the config")
             sys.exit(-1)
 
-        self.TOKEN = config["bot"]["token"]
-        self.BOT_ID = config["bot"]["id"]
-        self.LOG_FILE = config["bot"]["log_file"]
+        try:
+            self.TOKEN = config["bot"]["token"]
+            self.BOT_ID = config["bot"]["id"]
+            self.LOG_FILE = config["bot"]["log_file"]
 
-        self.MOD_MAIN = config["moderation"]["channel_id"]
-        self.MOD_ROLE = config["moderation"]["role"]
-        self.MUTED_ROLE = config["moderation"]["muted_role"]
-        self.LOG_MOD_FILE = config["moderation"]["log_file"]
+            self.ROLES_CHANNEL = config["roles"]["channel"]
+            self.ROLES = roles_info = {k:v["desc"] for k, v in config["roles"].items() if k!="channel"}
 
-        self.GUILD = config["server"]["guild"]
+            self.MOD_MAIN = config["moderation"]["channel_id"]
+            self.MOD_ROLE = config["moderation"]["role"]
+            self.MUTED_ROLE = config["moderation"]["muted_role"]
+            self.LOG_MOD_FILE = config["moderation"]["log_file"]
 
-        self.CHANNELS = config["channels"]
-        self.FLOOD_LIMIT = 3
-        self.MENTIONS_LIMIT = 3
+            self.GUILD = config["server"]["guild"]
+
+            self.CHANNELS = config["channels"]
+            self.FLOOD_LIMIT = 3
+            self.MENTIONS_LIMIT = 3
+        except KeyError:
+            print("Error while reading the configuration file. "
+                  "Make sure it contains all the required field")
+            sys.exit(-1)
 
         self.setup_log_files()
 

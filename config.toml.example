@@ -1,11 +1,21 @@
 [bot]
 token="..."
 id=
-general_log="log.csv"
-moderation_log="moderation.csv"
+log_file="..."
+
+[moderation]
+log_file="..."
+channel_id=
+role="..."
+muted_role="..."
 
 [server]
 guild=
+
+[roles]
+channel=
+    [roles.X]
+    desc="..."
 
 [channels]
     [channels.eventos]

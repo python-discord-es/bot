@@ -16,6 +16,7 @@ from comandos.flood import FloodSpam
 from comandos.limpia import Limpia
 from comandos.archivar import Archivar
 from comandos.enviar import Enviar
+from comandos.roles import Roles
 
 # Global instance of the server
 guild = None
@@ -108,6 +109,7 @@ async def main():
     await bot.add_cog(Limpia(bot))
     await bot.add_cog(Archivar(bot))
     await bot.add_cog(Enviar(bot))
+    await bot.add_cog(Roles(bot))
 
     # Removing the help command
     # bot.remove_command("help")
