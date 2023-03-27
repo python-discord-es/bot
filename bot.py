@@ -1,6 +1,7 @@
 import asyncio
 import pandas as pd
 import discord
+import logging
 from discord.ext import commands
 from datetime import datetime
 
@@ -28,7 +29,8 @@ config = Config()
 intents = discord.Intents().all()
 bot = commands.Bot(command_prefix="%", intents=intents)
 
-discord.utils.setup_logging()
+handler = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
+discord.utils.setup_logging(level=logging.DEBUG, handler=handler)
 
 
 @bot.event
