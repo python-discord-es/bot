@@ -40,13 +40,12 @@ class RoleButton(discord.ui.Button["Role"]):
             desc=f"Rol **{rol_name}** removido de {interaction.user.mention}",
             await interaction.user.remove_roles(role)
 
-        if msg and desc:
-            embed = discord.Embed(
-                title=msg,
-                colour=0xda373c,
-                description=desc,
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=10)
+        embed = discord.Embed(
+            title=msg,
+            colour=0xda373c,
+            description=desc,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=10)
 
 
 class RolesView(discord.ui.View):
