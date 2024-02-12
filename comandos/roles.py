@@ -50,7 +50,7 @@ class RoleButton(discord.ui.Button["Role"]):
 
 class RolesView(discord.ui.View):
     def __init__(self, guild):
-        super().__init__()
+        super().__init__(timeout=None)
         self.value = None
         self.guild = guild
 

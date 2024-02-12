@@ -30,12 +30,11 @@ intents = discord.Intents().all()
 bot = commands.Bot(command_prefix="%", intents=intents)
 
 handler = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
-discord.utils.setup_logging(level=logging.DEBUG, handler=handler)
+discord.utils.setup_logging(level=logging.INFO, handler=handler)
 
 
 @bot.event
 async def on_message(message):
-    print("INFO: on_messages main log")
     # Main log
     with open(config.log_main_file, "a") as f:
         date_str = f"{datetime.now()}"
@@ -62,7 +61,6 @@ async def on_ready():
 # different, and we need to find the message by the 'payload' ID first.
 @bot.event
 async def on_raw_reaction_add(payload):
-    print("INFO: on_raw_reaction")
     global guild
     if not guild:
         # guild = bot.get_guild(payload.guild_id)
