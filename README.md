@@ -1,15 +1,82 @@
 # Python Discord ES Bot
 
-Para configurar y utilizar el bot solo hay que instalar los requerimientos
-del bot en un entorno virtual, y ejectuar el archivo `bot.py`:
+## Instalación y configuración
 
-```
+Sigue estos pasos para configurar y utilizar el bot:
+
+### Prerequisitos
+
+- Python 3.8 o superior debe estar instalado. Si no lo tienes instalado, 
+puedes descargarlo desde [python.org](https://www.python.org/downloads/).
+
+### 1. Crear un entorno virtual e instalar dependencias
+
+Primero, crea un entorno virtual e instala los paquetes requeridos para 
+ejecutar el bot:
+
+```bash
 python -m venv env
-source env/bin/activate
+source env/bin/activate  # En Windows: env\Scripts\activate
 pip install -r requirements.txt
+```
 
+### 2. Configurar el archivo `.toml`
+
+El bot requiere un archivo de configuración `.toml` para funcionar 
+correctamente. Debes crear un archivo `config.toml` en el directorio 
+raíz del proyecto.
+
+Puedes usar el archivo `config.toml.example` como referencia y ajustarlo 
+según tus necesidades. A continuación, se muestra un ejemplo de la primera 
+parte del archivo `config.toml`:
+
+```toml
+[bot]
+# Reemplaza con el token de tu bot de Discord
+token="TU_TOKEN_AQUI"
+
+# Reemplaza con el ID de tu bot
+id=123456789012345678
+
+# Especifica la ruta donde se almacenará el archivo de logs
+log_file="ruta/del/archivo.log"
+
+[moderation]
+# Especifica la ruta donde se almacenarán los logs de moderación
+log_file="ruta/del/log_moderacion.log"
+
+# ID del canal de moderación
+channel_id=987654321098765432
+
+# Nombre del rol de moderador
+role="moderador"
+
+# Nombre del rol para los usuarios silenciados
+muted_role="silenciado"
+```
+
+Asegúrate de reemplazar `"TU_TOKEN_AQUI"`, `123456789012345678`, y otros 
+valores por los datos correctos para tu bot y servidor.
+
+### 3. Ejecutar el bot
+
+Una vez configurado el archivo `config.toml`, puedes iniciar el bot con el 
+siguiente comando:
+
+```bash
 python bot.py
 ```
+
+### Verificación
+
+Para asegurarte de que el bot está funcionando correctamente, puedes probarlo 
+ejecutando el siguiente comando en tu servidor:
+
+```
+%ayuda
+```
+
+Si el bot responde con la lista de comandos disponibles, la instalación ha sido exitosa.
 
 Actualmente el bot utilizado en el servidor tiene dos funcionalidades:
 
