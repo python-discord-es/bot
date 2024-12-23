@@ -20,6 +20,7 @@ SPAM_WORDS = [
     ("free", "gift", "http"),
     ("everyone", "gift", "http"),
     ("everyone", "free", "http"),
+    ("gratis", "full", "youtube.com", "telegra.ph"),
 ]
 
 WARNING_COLOR = 0x2B597B
@@ -169,7 +170,7 @@ class FloodSpam(commands.Cog):
         return True
 
     async def flood_check(self, message):
-        print("LOG: flood_check")
+        print(f"LOG: flood_check: {message}")
 
         if self._msg_author not in self.messages.normal:
             self.messages.normal[self._msg_author] = {self._msg_content: 1}

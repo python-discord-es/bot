@@ -67,6 +67,10 @@ async def on_raw_reaction_add(payload):
         guild = bot.get_guild(config.GUILD)
     channel = guild.get_channel(payload.channel_id)
 
+    if channel is None:
+        print(f"Couldn't get instance of channel {payload.channel_id}")
+        return
+
     try:
         message = await channel.fetch_message(payload.message_id)
 
