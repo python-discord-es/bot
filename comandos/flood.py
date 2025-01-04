@@ -83,8 +83,8 @@ class FloodSpam(commands.Cog):
         self._msg_author = message.author
         self._msg_author_mention = self._msg_author.mention
 
-        # skip when user has more roles
-        if len(self._msg_author.roles) > 1:
+        # skip coord role
+        if self.coord_role in self._msg_author.roles:
             return
 
         print("FloodSpam.on_message: flood check")
