@@ -10,7 +10,6 @@ from messages import Messages
 
 # Add cogs
 from comandos.ping import Ping
-from comandos.encuesta import Encuesta
 from comandos.moderacion import Moderacion
 from comandos.ayuda import Ayuda
 from comandos.flood import FloodSpam
@@ -55,35 +54,6 @@ async def on_ready():
     # await bot.tree.sync()
 
 
-# This function will monitor all the messages, even if they are from
-# before the bot became online.
-# The difference with the "on_reaction_add", is that the signature is
-# different, and we need to find the message by the 'payload' ID first.
-@bot.event
-async def on_raw_reaction_add(payload):
-    global guild
-    if not guild:
-        # guild = bot.get_guild(payload.guild_id)
-        guild = bot.get_guild(config.GUILD)
-    channel = guild.get_channel(payload.channel_id)
-
-    if channel is None:
-        print(f"Couldn't get instance of channel {payload.channel_id}")
-        return
-
-    try:
-        message = await channel.fetch_message(payload.message_id)
-
-        if message.content.startswith("**Encuesta "):
-            # We don't allow reactions from other bots
-            if not payload.member.bot:
-                for r in message.reactions:
-                    if not r.me:
-                        await message.remove_reaction(payload.emoji, payload.member)
-    except discord.errors.NotFound:
-        print("ERROR: Reaccion en Mensaje no encontrado")
-
-
 @bot.event
 async def on_command_error(msg, error):
     if isinstance(error, (commands.MissingRole, commands.MissingAnyRole)):
@@ -106,7 +76,6 @@ async def main():
     bot.data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]
 
     await bot.add_cog(Ping(bot))
-    await bot.add_cog(Encuesta(bot))
     await bot.add_cog(Moderacion(bot))
     await bot.add_cog(Ayuda(bot))
     await bot.add_cog(FloodSpam(bot))
