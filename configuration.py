@@ -30,9 +30,6 @@ class Config(metaclass=Singleton):
             self.BOT_ID = config["bot"]["id"]
             self.LOG_FILE = config["bot"]["log_file"]
 
-            self.ROLES_CHANNEL = config["roles"]["channel"]
-            self.ROLES = roles_info = {k:v["desc"] for k, v in config["roles"].items() if k!="channel"}
-
             self.MOD_MAIN = config["moderation"]["channel_id"]
             self.MOD_ROLE = config["moderation"]["role"]
             self.MUTED_ROLE = config["moderation"]["muted_role"]

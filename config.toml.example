@@ -12,11 +12,6 @@ muted_role="..."
 [server]
 guild=
 
-[roles]
-channel=
-    [roles.X]
-    desc="..."
-
 [channels]
     [channels.eventos]
     main=

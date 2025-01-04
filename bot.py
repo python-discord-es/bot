@@ -6,7 +6,6 @@ from discord.ext import commands
 from datetime import datetime
 
 from configuration import Config
-from messages import Messages
 
 # Add cogs
 from comandos.ping import Ping
@@ -16,7 +15,6 @@ from comandos.flood import FloodSpam
 from comandos.limpia import Limpia
 from comandos.archivar import Archivar
 from comandos.enviar import Enviar
-from comandos.roles import Roles
 
 # Global instance of the server
 guild = None
@@ -76,13 +74,14 @@ async def main():
     bot.data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]
 
     await bot.add_cog(Ping(bot))
-    await bot.add_cog(Moderacion(bot))
     await bot.add_cog(Ayuda(bot))
-    await bot.add_cog(FloodSpam(bot))
+
     await bot.add_cog(Limpia(bot))
     await bot.add_cog(Archivar(bot))
+
+    await bot.add_cog(Moderacion(bot))
+    await bot.add_cog(FloodSpam(bot))
     await bot.add_cog(Enviar(bot))
-    await bot.add_cog(Roles(bot))
 
     # Removing the help command
     # bot.remove_command("help")
