@@ -31,7 +31,7 @@ discord.utils.setup_logging(level=logging.INFO, handler=handler)
 
 
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message):
     # Main log
     with open(config.log_main_file, "a") as f:
         date_str = f"{datetime.now()}"
