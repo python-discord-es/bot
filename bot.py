@@ -71,7 +71,7 @@ async def main():
     ready_ids = set(data_accepted["message_id"]).union(data_rejected["message_id"])
 
     # keeping the data in the bot instance
-    bot.data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]
+    bot.data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]  # type: ignore[attr-defined]
 
     await bot.add_cog(Ping(bot))
     await bot.add_cog(Ayuda(bot))

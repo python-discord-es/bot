@@ -5,6 +5,8 @@ from configuration import Config
 from messages import Messages
 from utils import strip_message
 
+from typing import Optional
+
 config = Config()
 
 SPAM_WORDS = [
@@ -25,24 +27,57 @@ SPAM_WORDS = [
 
 WARNING_COLOR = 0x2B597B
 
+# Modal view to 'ban' or 'remove role' from users that get reported
+# as spam.
+class ModActionView(discord.ui.View):
+    def __init__(self, author: discord.Member, muted_role: discord.Role):
+        super().__init__(timeout=None)  # None = buttons never expire
+        self.author = author
+        self.muted_role = muted_role
+
+    @discord.ui.button(label="Banear Usuario", style=discord.ButtonStyle.danger)
+    async def ban_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.author.ban(reason=f"Baneado por un moderador: {interaction.user.mention}")
+        await interaction.response.send_message(f"{self.author.mention} fue baneado por moderación {interaction.user}.", ephemeral=True)
+
+    @discord.ui.button(label="Desmutear", style=discord.ButtonStyle.secondary)
+    async def remove_role_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.author.remove_roles(self.muted_role)
+        await interaction.response.send_message(f"{self.author.mention} ha sido desmuteado por moderación: {interaction.user.mention}.", ephemeral=True)
+
 
 class FloodSpam(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.main_mod_channel = None
+        self._main_mod_channel: Optional[discord.TextChannel] = None
 
         self.messages = Messages()
         self.messages.spam = config.get_spam_messages()
         self.messages.normal = {}
         self.guild = None
 
-        self.coord_role = None
-        self.muted_role = None
+        self._coord_role: Optional[discord.Role] = None
+        self._muted_role: Optional[discord.Role] = None
 
-        self._msg_channel = None
-        self._msg_content = None
-        self._msg_author = None
-        self._msg_author_mention = None
+        self._msg_channel: Optional[discord.TextChannel | discord.ForumChannel | discord.VoiceChannel] = None
+        self._msg_content: Optional[str] = None
+        self._msg_author: Optional[discord.Member] = None
+        self._msg_author_mention: Optional[str] = None
+
+    @property
+    def muted_role(self) -> discord.Role:
+        assert self._muted_role is not None, "Muted role not found - make sure it exists first"
+        return self._muted_role
+
+    @property
+    def coord_role(self) -> discord.Role:
+        assert self._coord_role is not None, "Coordination role not found - make sure it exists first"
+        return self._coord_role
+
+    @property
+    def main_mod_channel(self) -> discord.TextChannel:
+        assert self._main_mod_channel is not None, "Main Moderation channel not found - make sure it exists first"
+        return self._main_mod_channel
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -50,14 +85,14 @@ class FloodSpam(commands.Cog):
         if self.guild is None:
             self.guild = self.bot.get_guild(config.GUILD)
 
-        if self.coord_role is None:
-            self.coord_role = discord.utils.get(self.guild.roles, name=config.MOD_ROLE)
+        if self._coord_role is None:
+            self._coord_role = discord.utils.get(self.guild.roles, name=config.MOD_ROLE)
 
-        if self.muted_role is None:
-            self.muted_role = discord.utils.get(self.guild.roles, name=config.MUTED_ROLE)
+        if self._muted_role is None:
+            self._muted_role = discord.utils.get(self.guild.roles, name=config.MUTED_ROLE)
 
-        if self.main_mod_channel is None:
-            self.main_mod_channel = self.bot.get_channel(config.MOD_MAIN)
+        if self._main_mod_channel is None:
+            self._main_mod_channel = self.bot.get_channel(config.MOD_MAIN)
 
         self.clear_messages.start()
 
@@ -76,8 +111,6 @@ class FloodSpam(commands.Cog):
 
         if len(message.content) < 5:
             return
-
-        print("LOG: setting data from message")
         self._msg_channel = self.bot.get_channel(message.channel.id)
         self._msg_content = strip_message(message.content)
         self._msg_author = message.author
@@ -87,11 +120,9 @@ class FloodSpam(commands.Cog):
         if self.coord_role in self._msg_author.roles:
             return
 
-        print("FloodSpam.on_message: flood check")
         if await self.flood_check(message):
             return
 
-        print("FloodSpam.on_message: spam check")
         if self._msg_content in self.messages.spam:
             await self.alert_moderation(
                 "Alerta de SPAM (Mensaje conocido)",
@@ -111,10 +142,9 @@ class FloodSpam(commands.Cog):
                 description=msg,
                 colour=WARNING_COLOR,
             )
-            await self._msg_channel.send(embed=embed)
+            await self._msg_channel.send(embed=embed, delete_after = 60)
 
         # Check first more than 3 mentions
-        print("FloodSpam.on_message: mention_check")
         if await self.mention_check(message):
             self.add_spam_message(self._msg_content)
             await discord.Message.delete(message)
@@ -128,7 +158,7 @@ class FloodSpam(commands.Cog):
                 description=msg,
                 colour=WARNING_COLOR,
             )
-            await self._msg_channel.send(embed=embed)
+            await self._msg_channel.send(embed=embed, delete_after=300)
 
         print("FloodSpam.on_message: spam_check")
         if await self.spam_check(message):
@@ -143,21 +173,24 @@ class FloodSpam(commands.Cog):
                 description=msg,
                 colour=WARNING_COLOR,
             )
-            await self._msg_channel.send(embed=embed)
+            await self._msg_channel.send(embed=embed, delete_after = 300)
 
-    async def spam_check(self, message):
-        print("LOG: spam_check")
+    async def spam_check(self, message: discord.Message):
+        author = message.author
 
-        if not any(all(i in self._msg_content for i in sw) for sw in SPAM_WORDS):
+        if not isinstance(author, discord.Member):
+            return
+
+        if not any(all(i in message.content for i in sw) for sw in SPAM_WORDS):
             return False
 
         await self.alert_moderation("Alerta de SCAM", "scam")
 
         # Set muted role
-        await self._msg_author.add_roles(self.muted_role)
+        await author.add_roles(self.muted_role)
 
         _msg = (
-            f"Usuario {self._msg_author_mention} silenciado por compartir un mensaje que "
+            f"Usuario {author.mention} silenciado por compartir un mensaje que "
             "parece contener enlaces de engaño. El equipo de coordinación ha sido notificado."
         )
         embed = discord.Embed(
@@ -166,7 +199,7 @@ class FloodSpam(commands.Cog):
             colour=WARNING_COLOR,
         )
         # Send message notifying the user is muted
-        await self._msg_channel.send(emebed=embed)
+        await message.channel.send(embed=embed, delete_after = 300)
         return True
 
     async def flood_check(self, message):
@@ -202,7 +235,7 @@ class FloodSpam(commands.Cog):
                         colour=WARNING_COLOR,
                     )
                     # Send message notifying the user is muted
-                    await self._msg_channel.send(embed=embed)
+                    await self._msg_channel.send(embed=embed, delete_after = 120)
 
     async def mention_check(self, message):
         print("LOG: mention_check")
@@ -229,7 +262,7 @@ class FloodSpam(commands.Cog):
             colour=WARNING_COLOR,
         )
         # Send message notifying the user is muted
-        await self._msg_channel.send(embed=embed)
+        await self._msg_channel.send(embed=embed, delete_after = 300)
 
         return True
 
@@ -248,7 +281,7 @@ class FloodSpam(commands.Cog):
                 f"de {self._msg_author_mention} y se ha muteado."
             ),
             "flood": (
-                f"{self.coord_role.mention} Se detectaton mensajes repetitivos de "
+                f"{self.coord_role.mention} Se detectaron mensajes repetitivos de "
                 f"{self._msg_author_mention} y se ha muteado."
             ),
             "scam": (
@@ -261,17 +294,16 @@ class FloodSpam(commands.Cog):
             ),
         }
         msg = d_msg[reason]
-        print(msg)
         embed = discord.Embed(
             title=f"\N{NO ENTRY} {title}",
             description=msg,
             colour=WARNING_COLOR,
         )
-        embed.add_field(name="Mensaje", value=f"{self._msg_content}", inline=False)
+        embed.add_field(name="Mensaje", value=f"`{repr(self._msg_content)[1:-1]}`", inline=False)
         embed.add_field(
             name="En caso de ser spam",
             value=(
-                "Recuerda banear al usuario haciendo click derecho sobre su "
+                "Recuerda hacer clic en el botón 'Banear Usuario', o haciendo clic derecho sobre su "
                 "nick y seleccionando la opción 'Ban'"
             ),
             inline=False,
@@ -279,10 +311,12 @@ class FloodSpam(commands.Cog):
         embed.add_field(
             name="En caso de ser un error",
             value=(
-                'Remueve el rol "Muted" haciendo click derecho en el nick, '
+                'Clic en el botón "Desmutear", o haciendo click derecho en el nick, '
                 'luego "Roles" y deselecciona el rol "Muted".'
             ),
             inline=False,
         )
-
-        await self.main_mod_channel.send(embed=embed)
+        view = ModActionView(self._msg_author, self._muted_role)
+        thread = await self.main_mod_channel.create_thread(name=f"{title} - {self._msg_author_mention}",
+            auto_archive_duration=60, type=discord.ChannelType.public_thread)
+        await thread.send(embed=embed, view=view)

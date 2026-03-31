@@ -7,14 +7,15 @@ from configuration import Config
 config = Config()
 
 
+aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
+rechazar_emoji = "\N{CROSS MARK}"
+
 def get_moderation_channel(bot, channel_id):
     channel_mod = bot.get_channel(channel_id)
     return channel_mod
 
 
 def get_message_to_moderate(message):
-    aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
-    rechazar_emoji = "\N{CROSS MARK}"
     msg = (
         f"{datetime.utcnow()} UTC\n"
         f"Mensaje enviado desde {message.channel.mention} por {message.author.mention}\n\n"
@@ -36,7 +37,7 @@ def get_message_to_moderate(message):
 def strip_message(message):
     m = message[:].lower()
 
-    # Remove newlines, and tabs
+# Remove newlines, and tabs
     ft = (
         ("\n", " "),
         ("\r", " "),

@@ -7,7 +7,7 @@ class Ping(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(
-        name="ping", help="Comando de prueba", pass_context=True, with_app_command=True
+        name="ping", help="Comando de prueba", with_app_command=True
     )
     async def pingpong(self, ctx: commands.Context):
         await ctx.send("pong", ephemeral=True)

@@ -11,7 +11,7 @@ class Ayuda(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="ayuda", help="Comando de ayuda", pass_context=True)
+    @commands.command(name="ayuda", help="Comando de ayuda")
     async def mensaje_ayuda(self, ctx):
         # Skip if it's the bot
         if ctx.author.id == config.BOT_ID:

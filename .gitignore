@@ -1,3 +1,4 @@
 *.csv
 config.toml
 __pycache__
+bot.log

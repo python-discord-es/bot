@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 import discord
 from discord.ext import commands
@@ -17,11 +17,12 @@ class Archivar(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         if self.mod_channel is None:
-            self.mod_channel = self.bot.get_channel(config.MOD_MAIN)
+            self.mod_channel: Optional[discord.TextChannel] = self.bot.get_channel(config.MOD_MAIN)
 
-    @commands.command(name="archivar", help="Comando para archivar canales", pass_context=True)
+    @commands.command(name="archivar", help="Comando para archivar canales")
     @commands.has_role(config.MOD_ROLE)
-    async def archivar(self, ctx, *, channel: discord.TextChannel):
+    async def archivar(self, ctx, *, channel: discord.TextChannel) -> Optional[discord.Message]:
+        assert self.mod_channel is not None, "on_ready() was not called"
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"{timestamp}_canal_{channel.name}.csv"
@@ -42,7 +43,6 @@ class Archivar(commands.Cog):
     @commands.command(
         name="archivar_categoria",
         help="Comando para archivar los canales de una categoría",
-        pass_context=True,
     )
     @commands.has_role(config.MOD_ROLE)
     async def archivar_categoria(self, ctx, *, category: discord.CategoryChannel):
@@ -61,6 +61,10 @@ class Archivar(commands.Cog):
                 )
 
                 for msg in messages:
+
+                    if not isinstance(msg.channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
+                        return
+
                     m_id = msg.id
                     m_content = msg.content.strip().replace("\n", "\\n")
                     m_channel_id = msg.channel.id

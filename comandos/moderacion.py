@@ -7,17 +7,61 @@ import discord
 from discord.ext import commands
 
 from configuration import Config
-from utils import get_moderation_channel, get_message_to_moderate
+from utils import get_moderation_channel, get_message_to_moderate, aceptar_emoji, rechazar_emoji
 
+from typing import Optional
 config = Config()
+
+EMBED_COLOR = 0x2B597B
+
+class RejectModal(discord.ui.Modal, title="Rechazar Mensaje"):
+    reason = discord.ui.TextInput(
+        label="Razón del rechazo",
+        style=discord.TextStyle.paragraph,  # multiline input
+        placeholder="Ingresa la razón del rechazo...",
+        required=True
+    )
+
+    def __init__(self, author: discord.Member, cog, message_id: int):
+        super().__init__()
+        self.author = author
+        self.cog = cog
+        self.message_id = message_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        mod = interaction.user
+        await interaction.response.send_message(
+            f"{mod.mention} rechazó el mensaje de {self.author.mention}.\n"
+            f"Razón: {self.reason.value}",
+            ephemeral=True
+        )
+        await self.cog._rechazar_mensaje(interaction, self.message_id, self.reason.value)
+
+class ApproveRejectView(discord.ui.View):
+    def __init__(self, author: discord.Member, cog, message_id: int):
+        super().__init__(timeout=None)
+        self.author = author
+        self.cog = cog
+        self.message_id = message_id
+
+    @discord.ui.button(label="Aprobar", style=discord.ButtonStyle.success)
+    async def approve_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mod = interaction.user
+        await interaction.response.send_message(
+            f"{mod.mention} aprobó el mensaje de {self.author.mention}.",
+            ephemeral=True
+        )
+        await self.cog._aceptar_mensaje(interaction, self.message_id)
+
+    @discord.ui.button(label="Rechazar", style=discord.ButtonStyle.danger)
+    async def reject_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RejectModal(author=self.author, cog=self.cog, message_id=self.message_id))
 
 
 class Moderacion(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-        self._msg_content = None
-        self._msg_author = None
         self._msg_id = None
         self._msg_enc = None
 
@@ -30,7 +74,7 @@ class Moderacion(commands.Cog):
 
         return channel_main, channel_mod, channel_sub
 
-    def log_on_message(self, channel_sub):
+    def log_on_message(self, channel_sub, author):
         # Log
         # Add the new row to the data_mod, to have it in runtime
         # Add the new entry to the dat_mod file, to have it for the next time
@@ -41,8 +85,8 @@ class Moderacion(commands.Cog):
                 f'"{date_str}";'
                 f'"{self._msg_id}";'
                 f'"{channel_sub}";'
-                f'"{self._msg_author.id}";'
-                f'"{self._msg_author}";'
+                f'"{author.id}";'
+                f'"{author}";'
                 f'"{self._msg_enc}"\n'
             )
 
@@ -51,8 +95,8 @@ class Moderacion(commands.Cog):
                 "date": date_str,
                 "message_id": f"{self._msg_id}",
                 "channel": f"{channel_sub}",
-                "author_id": f"{self._msg_author.id}",
-                "author": f"{self._msg_author}",
+                "author_id": f"{author.id}",
+                "author": f"{author}",
                 "message": f"{self._msg_enc}",
             }
             self.bot.data_mod = pd.concat([self.bot.data_mod, pd.DataFrame([new_data])])
@@ -111,7 +155,7 @@ class Moderacion(commands.Cog):
 
         embed = discord.Embed(
             title="Mensajes pendientes de moderación",
-            colour=0x2B597B,
+            colour=EMBED_COLOR,
         )
 
         for idx, mod_row in data.iterrows():
@@ -156,24 +200,23 @@ class Moderacion(commands.Cog):
 
         # Setup object values
         self._msg_id = message.id
-        self._msg_content = message.content
-        self._msg_author = message.author
         self._msg_enc = base64.b64encode(message.content.encode("utf-8"))
 
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(ch_id)
 
-        self.log_on_message(ch_sub)
+        self.log_on_message(ch_sub, message.author)
 
         embed = discord.Embed(
             title="Mensaje Enviado",
-            description=f"Gracias {self._msg_author.mention}, tu mensaje espera moderación.",
-            colour=0x2B597B,
+            description=f"Gracias {message.author.mention}, tu mensaje espera moderación.",
+            colour=EMBED_COLOR,
         )
 
         reply_msg = await ch_sub.send(embed=embed)
 
         embed = get_message_to_moderate(message)
-        await ch_mod.send(embed=embed)
+        view = ApproveRejectView(message.author, cog=self, message_id = message.id)
+        await ch_mod.send(embed=embed, view=view)
 
         # Remove messages
         await asyncio.sleep(3)
@@ -182,33 +225,31 @@ class Moderacion(commands.Cog):
         await asyncio.sleep(3)
         await discord.Message.delete(reply_msg)
 
-    @commands.command(
-        name="rechazar",
-        help="Comando para rechazar mensajes en moderación",
-        pass_context=True,
-    )
-    @commands.has_role(config.MOD_ROLE)
-    async def rechazar_mensaje(self, ctx):
-        # Skip if it's the bot
-        if ctx.author.id == config.BOT_ID:
+    def _resolve_author(self, ctx):
+        return ctx.user if isinstance(ctx, discord.Interaction) else ctx.author
+
+    async def _rechazar_mensaje(self, ctx, message_id: Optional[int] = None, reason: Optional[str] = None):
+        author = self._resolve_author(ctx)
+
+        if not self._is_valid_message(ctx):
             return
 
-        # Check which channel combination we are using from the
-        # configuration information
         channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        post_id: Optional[str] = None
+        if isinstance(ctx, discord.Interaction) and message_id is not None:
+            post_id = str(message_id)
+            _post_reason = reason
+        else:
+            _post = ctx.message.content.replace("%rechazar", "").strip()
+            _post_id = _post.split()[0]
+            _post_reason = " ".join(_post.split()[1:])
+            post_id = None
+            try:
+                post_id = str(int(_post_id))
+            except ValueError:
+                await channel_mod.send(f"ID incorrecto: '{_post_id}', sólo utiliza números.")
+                return
 
-        if channel_mod.id != ctx.message.channel.id:
-            return
-
-        _post = ctx.message.content.replace("%rechazar", "").strip()
-        _post_id = _post.split()[0]
-        _post_reason = " ".join(_post.split()[1:])
-        post_id = None
-        try:
-            post_id = str(int(_post_id))
-        except ValueError:
-            await channel_mod.send(f"ID incorrecto: '{_post_id}', sólo utiliza números.")
-            return
 
         if post_id not in set(self.bot.data_mod["message_id"]):
             await channel_mod.send(f"El ID {post_id} no fue encontrado")
@@ -224,7 +265,7 @@ class Moderacion(commands.Cog):
         ]
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
 
-        self.log_rechazar(mod_row, post_id, ctx.message.author, _post_reason)
+        self.log_rechazar(mod_row, post_id, author, _post_reason)
 
         message_dec = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
 
@@ -236,7 +277,7 @@ class Moderacion(commands.Cog):
         embed = discord.Embed(
             title="Mensaje rechazado",
             description=f"{author.mention} tu mensaje necesita atención.",
-            colour=0x2B597B,
+            colour=EMBED_COLOR,
         )
         embed.add_field(
             name="Razón rechazado",
@@ -245,36 +286,51 @@ class Moderacion(commands.Cog):
         )
         embed.add_field(name="Mensaje original", value=message_dec, inline=False)
 
-        await ch_mod.send(f"Mensaje {post_id} rechazado, " f"enviada respuesta a {ch_main.mention}")
+        await ch_mod.send(f"{rechazar_emoji} Mensaje `{post_id}` rechazado, " f"enviada respuesta a {ch_main.mention}")
         await ch_sub.send(embed=embed)
 
-    # This command can only be used within the "moderation" channels
-    # described in the configuration file.
-    @commands.command(
-        name="aceptar",
-        help="Comando para aceptar mensajes en moderación",
-        pass_context=True,
-    )
-    @commands.has_role(config.MOD_ROLE)
-    async def aceptar_mensaje(self, ctx):
+
+    async def _is_valid_message(self, ctx):
+        author = self._resolve_author(ctx)
+
         # Skip if it's the bot
-        if ctx.author.id == config.BOT_ID:
-            return
+        if author.id == config.BOT_ID:
+            return False
 
         # Check which channel combination we are using from the
         # configuration information
         channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
 
         if channel_mod.id != ctx.message.channel.id:
+            return False
+
+
+    @commands.command(
+        name="rechazar",
+        help="Comando para rechazar mensajes en moderación",
+    )
+    @commands.has_role(config.MOD_ROLE)
+    async def rechazar_mensaje(self, ctx):
+        await self._rechazar_mensaje(ctx)
+
+    async def _aceptar_mensaje(self, ctx, message_id: Optional[int] = None):
+        author = self._resolve_author(ctx)
+
+        if not self._is_valid_message(ctx):
             return
 
-        _post = ctx.message.content.replace("%aceptar", "").strip()
-        post_id = None
-        try:
-            post_id = str(int(_post))
-        except ValueError:
-            await channel_mod.send(f"ID incorrecto: '{_post}', sólo utiliza números.")
-            return
+        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        post_id: Optional[str] = None
+        if isinstance(ctx, discord.Interaction) and message_id is not None:
+            post_id = str(message_id)
+        else:
+            _post = ctx.message.content.replace("%aceptar", "").strip()
+            post_id = None
+            try:
+                post_id = str(int(_post))
+            except ValueError:
+                await channel_mod.send(f"ID incorrecto: '{_post}', sólo utiliza números.")
+                return
 
         if post_id not in set(self.bot.data_mod["message_id"]):
             await channel_mod.send(f"El ID {post_id} no fue encontrado")
@@ -290,7 +346,7 @@ class Moderacion(commands.Cog):
         ]
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
 
-        self.log_aceptar(mod_row, post_id, ctx.message.author)
+        self.log_aceptar(mod_row, post_id, author)
 
         message_dec = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
         author = self.bot.get_user(int(mod_row["author_id"].values[0]))
@@ -298,13 +354,24 @@ class Moderacion(commands.Cog):
         # Remove that row, because it was handled
         self.bot.data_mod = self.bot.data_mod[~condition]
 
-        await ch_mod.send(f"Mensaje {post_id} aceptado, enviado al canal {ch_main.mention}")
-        await ch_main.send(f"[Enviado por {author.mention}]\n{message_dec}")
+        jump_url = f"https://discord.com/channels/{self.bot.guilds[0].id}/{ch_main.id}/{self._msg_id}"
+        await ch_mod.send(f"{aceptar_emoji} Mensaje `{post_id}` aceptado, enviado al canal {ch_main.mention}\nVer en {jump_url}")
+        await ch_main.send(f"> [Enviado por {author.mention}]\n{message_dec}")
+        print("aceptar_mensaje end")
+
+    # This command can only be used within the "moderation" channels
+    # described in the configuration file.
+    @commands.command(
+        name="aceptar",
+        help="Comando para aceptar mensajes en moderación",
+    )
+    @commands.has_role(config.MOD_ROLE)
+    async def aceptar_mensaje(self, ctx):
+        await self._aceptar_mensaje(ctx)
 
     @commands.command(
         name="mod",
         help="Comando para listar los mensajes pendientes",
-        pass_context=True,
     )
     @commands.has_role(config.MOD_ROLE)
     async def mostrar_mensajes(self, ctx):
@@ -332,6 +399,7 @@ class Moderacion(commands.Cog):
         except ValueError:
             await channel_mod.send(f"ID incorrecto '{_post}', sólo utiliza números.")
 
+
         if post_id:
             if post_id in self.bot.data_mod["message_id"].to_list():
                 # Sacar datos de df moderación
@@ -354,7 +422,7 @@ class Moderacion(commands.Cog):
                 embed = discord.Embed(
                     title="Mensaje pendiente de moderación",
                     description=msg,
-                    colour=0x2B597B,
+                    colour=EMBED_COLOR,
                 )
                 await channel_mod.send(embed=embed)
             else:
