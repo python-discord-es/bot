@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pandas as pd
@@ -216,7 +217,9 @@ class TestAceptarMensaje:
     ):
         add_pending_row(moderacion_cog, post_id=1, author_id=99, content="contenido aprobado")
         moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
-        moderacion_cog._msg_id = 12345
+        moderacion_channels["main"].send = AsyncMock(
+            return_value=SimpleNamespace(jump_url="https://discord.com/channels/1/2/3")
+        )
 
         ctx = make_ctx(
             author=make_member(name="moderador"),
@@ -227,10 +230,17 @@ class TestAceptarMensaje:
         await moderacion_cog._aceptar_mensaje(ctx)
 
         assert moderacion_cog.bot.data_mod.empty
-        moderacion_channels["mod"].send.assert_awaited_once()
         moderacion_channels["main"].send.assert_awaited_once()
         (msg,), _ = moderacion_channels["main"].send.call_args
         assert "contenido aprobado" in msg
+
+        # Regression test: the confirmation sent to the mod channel used to
+        # link to a jump_url built from self._msg_id (the *original
+        # submission's* id, in a different channel) instead of the message
+        # that was actually just posted to ch_main.
+        moderacion_channels["mod"].send.assert_awaited_once()
+        (mod_msg,), _ = moderacion_channels["mod"].send.call_args
+        assert "https://discord.com/channels/1/2/3" in mod_msg
 
     async def test_unknown_post_id_does_not_touch_channels(self, moderacion_cog, moderacion_channels):
         ctx = make_ctx(channel=moderacion_channels["mod"], content="%aceptar 999")

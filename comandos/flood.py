@@ -124,7 +124,7 @@ class FloodSpam(commands.Cog):
         # (e.g. an image-only spam message has no text at all).
         if len(message.content) < 5 and not message.attachments:
             return
-        self._msg_channel = self.bot.get_channel(message.channel.id)
+        self._msg_channel = message.channel
         self._msg_content = strip_message(message.content)
         self._msg_author = message.author
         self._msg_author_mention = self._msg_author.mention

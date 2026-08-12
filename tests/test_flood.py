@@ -399,6 +399,24 @@ class TestAlertModeration:
 # on_message pipeline
 # ---------------------------------------------------------------------------
 class TestOnMessagePipeline:
+    async def test_uses_message_channel_directly_not_a_bot_cache_lookup(self, flood_cog):
+        """Regression test: on_message used to do
+        ``self._msg_channel = self.bot.get_channel(message.channel.id)``
+        instead of just using ``message.channel``. A cache miss there made
+        ``_msg_channel`` None and crashed the first ``.send()`` downstream -
+        here the channel is never registered on the bot at all, so this
+        would fail the old way if the bug came back.
+        """
+        member = make_member(name="repetidor")
+        message = make_message(content="discord nitro free http://x", author=member)
+        assert flood_cog.bot.get_channel(message.channel.id) is None
+
+        await flood_cog.on_message(message)
+
+        # The point here isn't *how many* times it's sent, just that it
+        # didn't crash trying to call .send() on a None channel.
+        message.channel.send.assert_awaited()
+
     async def test_ignores_messages_from_bots(self, flood_cog):
         member = make_member(name="unbot", bot=True)
         message = make_message(content="discord nitro free http://x", author=member)
@@ -457,11 +475,7 @@ class TestOnMessagePipeline:
     ):
         flood_cog.messages.spam.add("mensaje ya conocido como spam")
         member = make_member(name="repetidor")
-        channel = make_text_channel(id=42)
-        flood_cog.bot.channels[channel.id] = channel
-        message = make_message(
-            content="Mensaje YA conocido como SPAM", author=member, channel=channel
-        )
+        message = make_message(content="Mensaje YA conocido como SPAM", author=member)
 
         await flood_cog.on_message(message)
 

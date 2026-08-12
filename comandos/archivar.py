@@ -30,7 +30,7 @@ class Archivar(commands.Cog):
         filename = f"{timestamp}_canal_{channel.name}.csv"
         messages = [m async for m in channel.history(limit=None)]
 
-        status = self.archivar_canal(filename, messages)
+        status, archived_filename = self.archivar_canal(filename, messages)
 
         if status:
             e = discord.Embed(
@@ -38,7 +38,7 @@ class Archivar(commands.Cog):
                 description=f"El canal {channel.mention} tiene {len(messages)} mensajes",
                 colour=0xFF0000,
             )
-            await self.mod_channel.send(embed=e, file=discord.File(filename))
+            await self.mod_channel.send(embed=e, file=discord.File(archived_filename))
         else:
             await self.mod_channel.send(f"Error: Canal '{channel.name}' no fue archivado.")
 
@@ -55,6 +55,14 @@ class Archivar(commands.Cog):
                 await self.archivar(ctx, channel=channel)
 
     def archivar_canal(self, filename: str, messages: List[discord.Message]):
+        """Write ``messages`` to ``filename`` as CSV.
+
+        Always returns a ``(success, filename)`` tuple - never just a bare
+        falsy value - so callers can safely do
+        ``status, archived_filename = self.archivar_canal(...)`` and check
+        ``status`` directly, instead of risking a non-empty-but-failed
+        tuple being treated as truthy.
+        """
         try:
             with open(filename, "w") as f:
                 f.write(
@@ -65,7 +73,7 @@ class Archivar(commands.Cog):
                 for msg in messages:
 
                     if not isinstance(msg.channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
-                        return
+                        return False, None
 
                     m_id = msg.id
                     m_content = msg.content.strip().replace("\n", "\\n")

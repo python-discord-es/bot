@@ -261,12 +261,16 @@ class Moderacion(commands.Cog):
         self._log_action("aceptar", vp.mod_row, vp.post_id, moderator)
         self.bot.data_mod = self.bot.data_mod[~vp.condition]
 
-        jump_url = f"https://discord.com/channels/{self.bot.guilds[0].id}/{vp.ch_main.id}/{self._msg_id}"
+        # Send to the destination channel first so the confirmation below can
+        # link to the message that was actually posted there, instead of
+        # guessing at a URL (the old code built the link from self._msg_id -
+        # the *original submission's* id in a different channel entirely -
+        # before the message below even existed).
+        sent_message = await vp.ch_main.send(f"> [Enviado por {vp.author.mention}]\n{vp.message_dec}")
         await vp.ch_mod.send(
             f"{aceptar_emoji} Mensaje `{vp.post_id}` aceptado, "
-            f"enviado al canal {vp.ch_main.mention}\nVer en {jump_url}"
+            f"enviado al canal {vp.ch_main.mention}\nVer en {sent_message.jump_url}"
         )
-        await vp.ch_main.send(f"> [Enviado por {vp.author.mention}]\n{vp.message_dec}")
 
     @commands.command(name="aceptar", help="Comando para aceptar mensajes en moderación")
     @commands.has_role(config.MOD_ROLE)
