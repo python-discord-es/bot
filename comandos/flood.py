@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import time
 
 from io import BytesIO
@@ -14,6 +15,7 @@ from utils import strip_message
 from typing import Optional
 
 config = Config()
+logger = logging.getLogger(__name__)
 
 SPAM_WORDS = [
     ("discord", "nitro", "free", "http"),
@@ -112,7 +114,7 @@ class FloodSpam(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        print("FloodSpam.on_message")
+        logger.debug("on_message: %s", message.id)
         await self.bot.process_commands(message)
 
         if message.author.bot or message.author.id == config.BOT_ID:
@@ -131,7 +133,6 @@ class FloodSpam(commands.Cog):
         if self.coord_role in self._msg_author.roles:
             return
 
-        print("FloodSpam.on_message: attachment_check")
         if await self.attachment_check(message):
             return
 
@@ -175,7 +176,6 @@ class FloodSpam(commands.Cog):
             )
             await self._msg_channel.send(embed=embed, delete_after=300)
 
-        print("FloodSpam.on_message: spam_check")
         if await self.spam_check(message):
             self.add_spam_message(self._msg_content)
             await discord.Message.delete(message)
@@ -218,7 +218,7 @@ class FloodSpam(commands.Cog):
         return True
 
     async def flood_check(self, message):
-        print(f"LOG: flood_check: {message}")
+        logger.debug("flood_check: %s", message.id)
 
         # Textless (image-only) messages are handled by attachment_check
         if not self._msg_content:
@@ -283,7 +283,7 @@ class FloodSpam(commands.Cog):
             buf.seek(0)
             return discord.File(buf, filename="evidencia.png", spoiler=True)
         except (UnidentifiedImageError, OSError, ValueError):
-            print(f"LOG: _sanitize_attachment: could not decode {attachment.filename!r}, skipping")
+            logger.warning("_sanitize_attachment: could not decode %r, skipping", attachment.filename)
             return None
 
     async def attachment_check(self, message: discord.Message) -> bool:
@@ -298,7 +298,7 @@ class FloodSpam(commands.Cog):
           same images across the server. When this fires, the offending
           images are hashed and cached for the fast path above.
         """
-        print("LOG: attachment_check")
+        logger.debug("attachment_check: %s", message.id)
 
         images = [
             a for a in message.attachments
@@ -383,7 +383,7 @@ class FloodSpam(commands.Cog):
         return True
 
     async def mention_check(self, message):
-        print("LOG: mention_check")
+        logger.debug("mention_check: %s", message.id)
 
         # Skip if 2 mentions or less
         if (len(message.mentions) + len(message.role_mentions)) < config.MENTIONS_LIMIT:
@@ -412,19 +412,19 @@ class FloodSpam(commands.Cog):
         return True
 
     def add_spam_message(self, message):
-        print("LOG: add_spam_message")
+        logger.info("add_spam_message: %r", message)
         with open(config.log_spam_file, "a") as f:
             f.write(f"{message}\n")
         self.messages.spam.add(message)
 
     def add_spam_image_hash(self, digest):
-        print("LOG: add_spam_image_hash")
+        logger.info("add_spam_image_hash: %s", digest)
         with open(config.log_image_spam_file, "a") as f:
             f.write(f"{digest}\n")
         self.messages.image_spam.add(digest)
 
     async def alert_moderation(self, title, reason, attachments=None):
-        print("LOG: alert_moderation")
+        logger.debug("alert_moderation: %s (%s)", title, reason)
 
         d_msg = {
             "menciones": (

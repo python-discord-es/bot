@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import logging
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
@@ -12,6 +13,7 @@ from configuration import Config
 from utils import get_moderation_channel, get_message_to_moderate, aceptar_emoji, rechazar_emoji
 
 config = Config()
+logger = logging.getLogger(__name__)
 
 EMBED_COLOR = 0x2B597B
 
@@ -319,7 +321,7 @@ class Moderacion(commands.Cog):
         for idx, mod_row in data.iterrows():
             author = self.bot.get_user(int(mod_row["author_id"]))
             if not author:
-                print(f"El author '{mod_row['author_id']}' ya no existe en el server.")
+                logger.warning("El author '%s' ya no existe en el server.", mod_row["author_id"])
                 continue
             m_message = base64.b64decode(eval(mod_row["message"])).decode("utf-8")
             embed.add_field(

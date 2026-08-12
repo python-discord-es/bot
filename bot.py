@@ -16,6 +16,11 @@ from comandos.limpia import Limpia
 from comandos.archivar import Archivar
 from comandos.enviar import Enviar
 
+# Every cog to register on startup. Add a class here (and to the imports
+# above) to wire up a new command/listener group - nothing else needs to
+# change.
+COGS = (Ping, Ayuda, Limpia, Archivar, Moderacion, FloodSpam, Enviar)
+
 # Global instance of the server
 guild = None
 
@@ -28,6 +33,7 @@ bot = commands.Bot(command_prefix="%", intents=intents)
 
 handler = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
 discord.utils.setup_logging(level=logging.INFO, handler=handler)
+logger = logging.getLogger(__name__)
 
 
 @bot.event
@@ -48,16 +54,16 @@ async def on_message(message: discord.Message):
 
 @bot.event
 async def on_ready():
-    print("Syncing tree...")
+    logger.info("Syncing tree...")
     # await bot.tree.sync()
 
 
 @bot.event
 async def on_command_error(msg, error):
     if isinstance(error, (commands.MissingRole, commands.MissingAnyRole)):
-        print(f"MissingRole ERROR: {error}")
+        logger.warning("MissingRole ERROR: %s", error)
     else:
-        print(error)
+        logger.error("Unhandled command error", exc_info=error)
 
 
 async def main():
@@ -73,21 +79,15 @@ async def main():
     # keeping the data in the bot instance
     bot.data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]  # type: ignore[attr-defined]
 
-    await bot.add_cog(Ping(bot))
-    await bot.add_cog(Ayuda(bot))
-
-    await bot.add_cog(Limpia(bot))
-    await bot.add_cog(Archivar(bot))
-
-    await bot.add_cog(Moderacion(bot))
-    await bot.add_cog(FloodSpam(bot))
-    await bot.add_cog(Enviar(bot))
+    for cog_cls in COGS:
+        await bot.add_cog(cog_cls(bot))
 
     # Removing the help command
     # bot.remove_command("help")
 
-    print("Running...")
+    logger.info("Running...")
     await bot.start(config.TOKEN)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -7,6 +8,7 @@ from discord.ext import commands
 from configuration import Config
 
 config = Config()
+logger = logging.getLogger(__name__)
 
 
 class Archivar(commands.Cog):
@@ -78,9 +80,9 @@ class Archivar(commands.Cog):
                         f"{m_id};{m_content};{m_channel_id};{m_channel_name};{m_channel_category};"
                         f"{m_author_id};{m_author_name}#{m_author_discriminator};{m_author_bot}\n"
                     )
-            print(f"File written: {filename}")
-        except Exception as e:
-            print(f"{type(e).__name__}: {e}")
+            logger.info("File written: %s", filename)
+        except Exception:
+            logger.exception("Failed to archive channel into %s", filename)
             return False, None
 
         return True, filename
