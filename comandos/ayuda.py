@@ -17,16 +17,7 @@ class Ayuda(commands.Cog):
         if ctx.author.id == config.BOT_ID:
             return
 
-        # Check which channel combination we are using from the
-        # configuration information
-        channel_mod = self.bot.get_channel(ctx.channel.id)
-
-        if channel_mod:
-            e = self.get_mod_help()
-            await channel_mod.send(embed=e)
-        else:
-            e = self.get_main_help()
-            await ctx.channel.send(embed=e)
+        await ctx.channel.send(embed=self.get_mod_help())
 
     def get_mod_help(self):
         embed = discord.Embed(
@@ -60,30 +51,5 @@ class Ayuda(commands.Cog):
             name="`%limpia`",
             value="Limpia N mensajes del canal de moderación",
             inline=False,
-        )
-        return embed
-
-    def get_main_help(self):
-        embed = discord.Embed(
-            title="Comandos Disponibles",
-            colour=colors.BRAND,
-        )
-        embed.add_field(
-            name='`%encuesta "pregunta"`',
-            value=(
-                "Para hacer preguntas de Sí y No.\n" 'Ejemplo:\n `%encuesta "¿Te gusta el té?"`'
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name='`%encuesta "pregunta" "opción a" "opción b" ...`',
-            value=(
-                "Para hacer preguntas con varias opciones.\n"
-                'Ejemplo:\n `%encuesta "¿Lenguaje favorito?" "Inglés" "Español" "Python"`'
-            ),
-            inline=False,
-        )
-        embed.set_footer(
-            text='Importante: La pregunta y opciones deben ir entre comillas dobles "..."'
         )
         return embed
