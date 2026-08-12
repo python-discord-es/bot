@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import base64
 import logging
@@ -16,6 +17,27 @@ config = Config()
 logger = logging.getLogger(__name__)
 
 EMBED_COLOR = 0x2B597B
+
+
+def _encode_message(content: str) -> str:
+    """Base64-encode a message's content for storage in data_mod/the log files."""
+    return base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+
+def _decode_message(stored: str) -> str:
+    """Reverse ``_encode_message``.
+
+    Also tolerates the legacy on-disk format: older code stored the
+    *repr* of the base64 `bytes` object (e.g. ``"b'aG9sYQ=='"``, via
+    ``f"{base64.b64encode(...)}"``) and reversed it with ``eval()``. Rows
+    written before this change still look like that, so a plain
+    ``b64decode`` fails validation and we fall back to safely parsing that
+    literal with ``ast.literal_eval`` instead - no ``eval()`` involved.
+    """
+    try:
+        return base64.b64decode(stored, validate=True).decode("utf-8")
+    except ValueError:
+        return base64.b64decode(ast.literal_eval(stored)).decode("utf-8")
 
 
 @dataclass
@@ -148,7 +170,7 @@ class Moderacion(commands.Cog):
         ]["submission"]
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
 
-        message_dec = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
+        message_dec = _decode_message(mod_row["message"].values[0])
         author = self.bot.get_user(int(mod_row["author_id"].values[0]))
 
         return ValidatedPost(
@@ -231,7 +253,7 @@ class Moderacion(commands.Cog):
             return
 
         self._msg_id = message.id
-        self._msg_enc = base64.b64encode(message.content.encode("utf-8"))
+        self._msg_enc = _encode_message(message.content)
 
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(ch_id)
         self.log_on_message(ch_sub, message.author)
@@ -327,7 +349,7 @@ class Moderacion(commands.Cog):
             if not author:
                 logger.warning("El author '%s' ya no existe en el server.", mod_row["author_id"])
                 continue
-            m_message = base64.b64decode(eval(mod_row["message"])).decode("utf-8")
+            m_message = _decode_message(mod_row["message"])
             embed.add_field(
                 name=f"ID: `{mod_row['message_id']}`",
                 value=f"{m_message[:30]}...\nFecha: `{mod_row['date']}`\nAutor: {author.mention}",
@@ -363,7 +385,7 @@ class Moderacion(commands.Cog):
         condition = self.bot.data_mod["message_id"] == post_id
         mod_row = self.bot.data_mod[condition]
         author = self.bot.get_user(int(mod_row["author_id"].values[0]))
-        m_message = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
+        m_message = _decode_message(mod_row["message"].values[0])
 
         embed = discord.Embed(
             title="Mensaje pendiente de moderación",

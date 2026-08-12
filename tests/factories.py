@@ -162,10 +162,17 @@ def make_interaction(user=None, channel=None):
 
 
 def encode_for_mod_row(text: str) -> str:
-    """Matches ``Moderacion.on_message``'s encoding of a message's content
-    into the ``data_mod``/log-file ``message`` column: a base64-encoded
-    ``bytes`` object rendered through an f-string (so later ``eval()``'d
-    back into a real ``bytes`` object by the accept/reject/list commands)."""
+    """Matches ``Moderacion``'s current encoding of a message's content into
+    the ``data_mod``/log-file ``message`` column: a plain base64 string."""
+    import base64
+
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def encode_for_mod_row_legacy(text: str) -> str:
+    """Matches the *old* (pre-fix) encoding: the repr of a base64 ``bytes``
+    object, e.g. ``"b'aG9sYQ=='"``. Used to test that rows logged before
+    the eval()-removal fix still decode correctly."""
     import base64
 
     return f"{base64.b64encode(text.encode('utf-8'))}"

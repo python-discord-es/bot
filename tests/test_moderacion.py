@@ -4,8 +4,10 @@ from unittest.mock import AsyncMock
 import pandas as pd
 import pytest
 
+from comandos.moderacion import _decode_message, _encode_message
 from tests.factories import (
     encode_for_mod_row,
+    encode_for_mod_row_legacy,
     make_ctx,
     make_interaction,
     make_member,
@@ -13,17 +15,36 @@ from tests.factories import (
 
 
 def add_pending_row(cog, post_id, *, channel="envio-eventos", author_id=42, author_name="autor",
-                     content="contenido de prueba"):
+                     content="contenido de prueba", legacy_encoding=False):
+    encode = encode_for_mod_row_legacy if legacy_encoding else encode_for_mod_row
     new_row = {
         "date": "2026-01-01 00:00:00",
         "message_id": str(post_id),
         "channel": channel,
         "author_id": str(author_id),
         "author": author_name,
-        "message": encode_for_mod_row(content),
+        "message": encode(content),
     }
     cog.bot.data_mod = pd.concat([cog.bot.data_mod, pd.DataFrame([new_row])], ignore_index=True)
     return new_row
+
+
+class TestMessageEncoding:
+    def test_round_trips(self):
+        assert _decode_message(_encode_message("hola mundo")) == "hola mundo"
+
+    def test_round_trips_accented_and_emoji(self):
+        text = "¿Cómo estás? 🎉"
+        assert _decode_message(_encode_message(text)) == text
+
+    def test_decodes_the_legacy_bytes_repr_format(self):
+        """Rows written before the eval()-removal fix stored the repr of a
+        base64 bytes object (e.g. "b'aG9sYQ=='") instead of a plain base64
+        string. _decode_message must still handle those without eval()."""
+        legacy = encode_for_mod_row_legacy("mensaje antiguo")
+
+        assert legacy.startswith("b'")
+        assert _decode_message(legacy) == "mensaje antiguo"
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +141,18 @@ class TestGetValidatedPost:
         assert vp.ch_mod is moderacion_channels["mod"]
         assert vp.ch_sub is moderacion_channels["sub"]
         assert vp.author.id == 99
+
+    async def test_resolves_a_row_logged_before_the_eval_removal_fix(
+        self, moderacion_cog, moderacion_channels
+    ):
+        add_pending_row(moderacion_cog, post_id=2, author_id=99, legacy_encoding=True)
+        moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
+        ctx = make_ctx(channel=moderacion_channels["mod"], content="%aceptar 2")
+
+        vp = await moderacion_cog._get_validated_post(ctx, None, "%aceptar")
+
+        assert vp is not None
+        assert vp.message_dec == "contenido de prueba"
 
     async def test_unknown_post_id_reports_error_and_returns_none(
         self, moderacion_cog, moderacion_channels
