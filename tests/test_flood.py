@@ -160,6 +160,32 @@ class TestAttachmentCheckFastPath:
 
 
 class TestAttachmentCheckBurstPath:
+    async def test_each_attachment_is_only_downloaded_once(self, flood_cog):
+        """Regression test: within a single attachment_check() call,
+        attachment.read() used to be called once in the fast-path
+        hash-check loop, again to cache the hash on a burst trigger, and a
+        third time inside alert_moderation's sanitize step - up to 3 CDN
+        downloads per image for the one message that triggers the burst.
+        """
+        member = make_member(name="comprometido")
+        first = make_message(
+            author=member,
+            channel=make_text_channel(id=1),
+            attachments=[make_attachment(filename="a1.png"), make_attachment(filename="a2.png")],
+        )
+        prime_cog(flood_cog, first)
+        await flood_cog.attachment_check(first)
+
+        b1 = make_attachment(filename="b1.png", data=make_png_bytes((255, 0, 0)))
+        b2 = make_attachment(filename="b2.png", data=make_png_bytes((0, 255, 0)))
+        second = make_message(author=member, channel=make_text_channel(id=2), attachments=[b1, b2])
+        prime_cog(flood_cog, second)
+        result = await flood_cog.attachment_check(second)
+
+        assert result is True  # sanity check that the burst path actually ran
+        b1.read.assert_awaited_once()
+        b2.read.assert_awaited_once()
+
     async def test_single_channel_two_images_does_not_trigger(self, flood_cog):
         member = make_member(name="autor")
         message = make_message(
@@ -284,13 +310,11 @@ class TestAttachmentCheckBurstPath:
 
 
 # ---------------------------------------------------------------------------
-# _sanitize_attachment / _hash_attachment
+# _sanitize_bytes / _hash_bytes
 # ---------------------------------------------------------------------------
-class TestSanitizeAttachment:
+class TestSanitizeBytes:
     async def test_valid_image_round_trips_as_spoiler_file(self, flood_cog):
-        attachment = make_attachment(data=make_png_bytes())
-
-        result = await flood_cog._sanitize_attachment(attachment)
+        result = await flood_cog._sanitize_bytes(make_png_bytes())
 
         assert result is not None
         assert isinstance(result, discord.File)
@@ -298,24 +322,19 @@ class TestSanitizeAttachment:
         assert result.filename.endswith("evidencia.png") or "SPOILER" in result.filename
 
     async def test_garbage_bytes_returns_none(self, flood_cog):
-        attachment = make_attachment(data=b"not an image, just garbage" * 10)
-
-        assert await flood_cog._sanitize_attachment(attachment) is None
+        assert await flood_cog._sanitize_bytes(b"not an image, just garbage" * 10) is None
 
     async def test_truncated_image_returns_none(self, flood_cog):
-        attachment = make_attachment(data=make_png_bytes()[:15])
-
-        assert await flood_cog._sanitize_attachment(attachment) is None
+        assert await flood_cog._sanitize_bytes(make_png_bytes()[:15]) is None
 
 
-class TestHashAttachment:
-    async def test_matches_sha256_of_bytes(self, flood_cog):
+class TestHashBytes:
+    def test_matches_sha256_of_bytes(self, flood_cog):
         import hashlib
 
         data = b"some bytes"
-        attachment = make_attachment(data=data)
 
-        assert await flood_cog._hash_attachment(attachment) == hashlib.sha256(data).hexdigest()
+        assert flood_cog._hash_bytes(data) == hashlib.sha256(data).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -363,9 +382,8 @@ class TestAlertModeration:
     async def test_attachments_are_forwarded_sanitized_and_spoilered(self, flood_cog):
         message = make_message()
         prime_cog(flood_cog, message)
-        images = [make_attachment(data=make_png_bytes())]
 
-        await flood_cog.alert_moderation("Alerta", "known_image", attachments=images)
+        await flood_cog.alert_moderation("Alerta", "known_image", image_bytes=[make_png_bytes()])
 
         thread = flood_cog.main_mod_channel.create_thread.return_value
         _, kwargs = thread.send.call_args
@@ -375,9 +393,8 @@ class TestAlertModeration:
     async def test_undecodable_attachment_is_skipped_not_forwarded(self, flood_cog):
         message = make_message()
         prime_cog(flood_cog, message)
-        images = [make_attachment(data=b"garbage" * 10)]
 
-        await flood_cog.alert_moderation("Alerta", "known_image", attachments=images)
+        await flood_cog.alert_moderation("Alerta", "known_image", image_bytes=[b"garbage" * 10])
 
         thread = flood_cog.main_mod_channel.create_thread.return_value
         _, kwargs = thread.send.call_args

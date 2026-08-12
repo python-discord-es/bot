@@ -257,13 +257,12 @@ class FloodSpam(commands.Cog):
                     await self._msg_channel.send(embed=embed, delete_after = 120)
 
     @staticmethod
-    async def _hash_attachment(attachment: discord.Attachment) -> str:
-        data = await attachment.read()
+    def _hash_bytes(data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
     @staticmethod
-    async def _sanitize_attachment(attachment: discord.Attachment) -> Optional[discord.File]:
-        """Decode and re-encode an attachment before it's shown to moderators.
+    async def _sanitize_bytes(data: bytes) -> Optional[discord.File]:
+        """Decode and re-encode image bytes before they're shown to moderators.
 
         Images from a compromised/malicious account are untrusted input: a
         crafted file could try to exploit a bug in whatever renders its
@@ -271,10 +270,9 @@ class FloodSpam(commands.Cog):
         via Pillow into a fresh PNG strips anything relying on a malformed
         file structure, and the result is still sent as a spoiler so viewing
         it requires an explicit click rather than an automatic preview.
-        Returns ``None`` if the attachment can't be safely decoded.
+        Returns ``None`` if the image can't be safely decoded.
         """
         try:
-            data = await attachment.read()
             with Image.open(BytesIO(data)) as img:
                 img.load()
                 clean = img.convert("RGB")
@@ -283,7 +281,7 @@ class FloodSpam(commands.Cog):
             buf.seek(0)
             return discord.File(buf, filename="evidencia.png", spoiler=True)
         except (UnidentifiedImageError, OSError, ValueError):
-            logger.warning("_sanitize_attachment: could not decode %r, skipping", attachment.filename)
+            logger.warning("_sanitize_bytes: could not decode image, skipping")
             return None
 
     async def attachment_check(self, message: discord.Message) -> bool:
@@ -307,14 +305,19 @@ class FloodSpam(commands.Cog):
         if not images:
             return False
 
+        # Read each attachment's bytes once and reuse them below for hashing
+        # and (if needed) sanitizing, instead of re-downloading from
+        # Discord's CDN for each separate step.
+        image_bytes = [await a.read() for a in images]
+
         # Fast path: any image already known to be spam/scam
-        for attachment in images:
-            digest = await self._hash_attachment(attachment)
+        for data in image_bytes:
+            digest = self._hash_bytes(data)
             if digest in self.messages.image_spam:
                 await self.alert_moderation(
                     "Alerta de SPAM (Imagen conocida)",
                     "known_image",
-                    attachments=images,
+                    image_bytes=image_bytes,
                 )
 
                 # Set muted role
@@ -353,16 +356,15 @@ class FloodSpam(commands.Cog):
         await self.alert_moderation(
             "Alerta de SPAM (Imágenes en varios canales)",
             "image_burst",
-            attachments=images,
+            image_bytes=image_bytes,
         )
 
         # Set muted role
         await self._msg_author.add_roles(self.muted_role)
 
         # Cache the images involved so future occurrences hit the fast path
-        for attachment in images:
-            digest = await self._hash_attachment(attachment)
-            self.add_spam_image_hash(digest)
+        for data in image_bytes:
+            self.add_spam_image_hash(self._hash_bytes(data))
 
         # Reset author's channel tracking now that we've acted on it
         self.messages.image_authors[self._msg_author] = {}
@@ -423,7 +425,7 @@ class FloodSpam(commands.Cog):
             f.write(f"{digest}\n")
         self.messages.image_spam.add(digest)
 
-    async def alert_moderation(self, title, reason, attachments=None):
+    async def alert_moderation(self, title, reason, image_bytes=None):
         logger.debug("alert_moderation: %s (%s)", title, reason)
 
         d_msg = {
@@ -483,9 +485,9 @@ class FloodSpam(commands.Cog):
         # a malformed file to exploit an image parser) and sent as a spoiler
         # so viewing them requires an explicit click.
         files = []
-        if attachments:
-            for attachment in attachments:
-                sanitized = await self._sanitize_attachment(attachment)
+        if image_bytes:
+            for data in image_bytes:
+                sanitized = await self._sanitize_bytes(data)
                 if sanitized is not None:
                     files.append(sanitized)
             embed.add_field(
