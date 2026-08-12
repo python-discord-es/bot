@@ -40,6 +40,11 @@ class Config(metaclass=Singleton):
             self.CHANNELS = config["channels"]
             self.FLOOD_LIMIT = 3
             self.MENTIONS_LIMIT = 3
+            # Minimum number of images in a single message, and the time
+            # window (seconds) in which the same author posting such a
+            # message in 2+ different channels is treated as a spam burst.
+            self.IMAGE_ATTACHMENT_LIMIT = 2
+            self.IMAGE_BURST_WINDOW = 60 * 5
         except KeyError:
             print("Error while reading the configuration file. "
                   "Make sure it contains all the required field")
@@ -51,6 +56,7 @@ class Config(metaclass=Singleton):
         self.log_file = Path(self.LOG_FILE)
         self.log_mod_file = Path(self.LOG_MOD_FILE)
         self.log_spam_file = Path("logs/spam_log.csv")
+        self.log_image_spam_file = Path("logs/image_spam_log.csv")
         self.log_main_file = Path("logs/main_log.csv")
 
         # create an '_accepted' file based on the moderation log file
@@ -77,6 +83,7 @@ class Config(metaclass=Singleton):
             "date;message_id;channel;author_id;author;message;moderator;reason\n",
         )
         self.check_create_file(self.log_spam_file, "\n")
+        self.check_create_file(self.log_image_spam_file, "\n")
         self.check_create_file(
             self.log_main_file,
             "date;command;message_id;channel;author_id;author;message\n",
@@ -90,6 +97,17 @@ class Config(metaclass=Singleton):
                 print(">>>", line.strip())
                 d.add(line.strip())
         print("LOG: get_spam_messages", d)
+        return d
+
+    def get_spam_image_hashes(self):
+        # Adding known scam image hashes (sha256 of the raw attachment bytes)
+        d = set()
+        with open(self.log_image_spam_file) as f:
+            for line in f.readlines():
+                line = line.strip()
+                if line:
+                    d.add(line)
+        print("LOG: get_spam_image_hashes", d)
         return d
 
     def check_create_file(self, fname: Path, msg: str) -> None:

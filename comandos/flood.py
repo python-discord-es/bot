@@ -1,5 +1,11 @@
+import hashlib
+import time
+
+from io import BytesIO
+
 import discord
 from discord.ext import commands, tasks
+from PIL import Image, UnidentifiedImageError
 
 from configuration import Config
 from messages import Messages
@@ -54,6 +60,8 @@ class FloodSpam(commands.Cog):
         self.messages = Messages()
         self.messages.spam = config.get_spam_messages()
         self.messages.normal = {}
+        self.messages.image_spam = config.get_spam_image_hashes()
+        self.messages.image_authors = {}
         self.guild = None
 
         self._coord_role: Optional[discord.Role] = None
@@ -100,6 +108,7 @@ class FloodSpam(commands.Cog):
     @tasks.loop(seconds=60 * 30)
     async def clear_messages(self):
         self.messages.normal = {}
+        self.messages.image_authors = {}
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -109,7 +118,9 @@ class FloodSpam(commands.Cog):
         if message.author.bot or message.author.id == config.BOT_ID:
             return
 
-        if len(message.content) < 5:
+        # Ignore short, textless messages, unless they carry attachments
+        # (e.g. an image-only spam message has no text at all).
+        if len(message.content) < 5 and not message.attachments:
             return
         self._msg_channel = self.bot.get_channel(message.channel.id)
         self._msg_content = strip_message(message.content)
@@ -118,6 +129,10 @@ class FloodSpam(commands.Cog):
 
         # skip coord role
         if self.coord_role in self._msg_author.roles:
+            return
+
+        print("FloodSpam.on_message: attachment_check")
+        if await self.attachment_check(message):
             return
 
         if await self.flood_check(message):
@@ -205,6 +220,10 @@ class FloodSpam(commands.Cog):
     async def flood_check(self, message):
         print(f"LOG: flood_check: {message}")
 
+        # Textless (image-only) messages are handled by attachment_check
+        if not self._msg_content:
+            return False
+
         if self._msg_author not in self.messages.normal:
             self.messages.normal[self._msg_author] = {self._msg_content: 1}
         else:
@@ -236,6 +255,132 @@ class FloodSpam(commands.Cog):
                     )
                     # Send message notifying the user is muted
                     await self._msg_channel.send(embed=embed, delete_after = 120)
+
+    @staticmethod
+    async def _hash_attachment(attachment: discord.Attachment) -> str:
+        data = await attachment.read()
+        return hashlib.sha256(data).hexdigest()
+
+    @staticmethod
+    async def _sanitize_attachment(attachment: discord.Attachment) -> Optional[discord.File]:
+        """Decode and re-encode an attachment before it's shown to moderators.
+
+        Images from a compromised/malicious account are untrusted input: a
+        crafted file could try to exploit a bug in whatever renders its
+        thumbnail (e.g. the libwebp CVE-2023-4863 heap overflow). Re-encoding
+        via Pillow into a fresh PNG strips anything relying on a malformed
+        file structure, and the result is still sent as a spoiler so viewing
+        it requires an explicit click rather than an automatic preview.
+        Returns ``None`` if the attachment can't be safely decoded.
+        """
+        try:
+            data = await attachment.read()
+            with Image.open(BytesIO(data)) as img:
+                img.load()
+                clean = img.convert("RGB")
+            buf = BytesIO()
+            clean.save(buf, format="PNG")
+            buf.seek(0)
+            return discord.File(buf, filename="evidencia.png", spoiler=True)
+        except (UnidentifiedImageError, OSError, ValueError):
+            print(f"LOG: _sanitize_attachment: could not decode {attachment.filename!r}, skipping")
+            return None
+
+    async def attachment_check(self, message: discord.Message) -> bool:
+        """Detect image-based spam/scam bursts from (often compromised) accounts.
+
+        Two mechanisms:
+        - Fast path: the message contains an image matching a hash we've
+          already confirmed as spam/scam (see ``add_spam_image_hash``).
+        - Burst path: the same author posts a message with 2+ image
+          attachments in 2+ different channels within a short time window,
+          which is the signature of a compromised account spraying the
+          same images across the server. When this fires, the offending
+          images are hashed and cached for the fast path above.
+        """
+        print("LOG: attachment_check")
+
+        images = [
+            a for a in message.attachments
+            if (a.content_type or "").startswith("image/")
+        ]
+        if not images:
+            return False
+
+        # Fast path: any image already known to be spam/scam
+        for attachment in images:
+            digest = await self._hash_attachment(attachment)
+            if digest in self.messages.image_spam:
+                await self.alert_moderation(
+                    "Alerta de SPAM (Imagen conocida)",
+                    "known_image",
+                    attachments=images,
+                )
+
+                # Set muted role
+                await self._msg_author.add_roles(self.muted_role)
+
+                await discord.Message.delete(message)
+                msg = (
+                    f"El mensaje del usuario {self._msg_author_mention} fue borrado por "
+                    "contener una imagen detectada previamente como spam."
+                )
+                embed = discord.Embed(
+                    title="\N{NO ENTRY} Alerta de posible SPAM",
+                    description=msg,
+                    colour=WARNING_COLOR,
+                )
+                await self._msg_channel.send(embed=embed, delete_after=60)
+                return True
+
+        if len(images) < config.IMAGE_ATTACHMENT_LIMIT:
+            return False
+
+        # Burst path: same author, 2+ images, 2+ different channels, short window
+        now = time.time()
+        channels = self.messages.image_authors.get(self._msg_author, {})
+        channels = {
+            channel_id: ts
+            for channel_id, ts in channels.items()
+            if now - ts <= config.IMAGE_BURST_WINDOW
+        }
+        channels[message.channel.id] = now
+        self.messages.image_authors[self._msg_author] = channels
+
+        if len(channels) < 2:
+            return False
+
+        await self.alert_moderation(
+            "Alerta de SPAM (Imágenes en varios canales)",
+            "image_burst",
+            attachments=images,
+        )
+
+        # Set muted role
+        await self._msg_author.add_roles(self.muted_role)
+
+        # Cache the images involved so future occurrences hit the fast path
+        for attachment in images:
+            digest = await self._hash_attachment(attachment)
+            self.add_spam_image_hash(digest)
+
+        # Reset author's channel tracking now that we've acted on it
+        self.messages.image_authors[self._msg_author] = {}
+
+        await discord.Message.delete(message)
+        msg = (
+            f"El mensaje del usuario {self._msg_author_mention} fue borrado por compartir "
+            "imágenes en varios canales en poco tiempo, lo cual podría indicar una cuenta "
+            "comprometida.\nEvita **hacer click** en enlaces o seguir instrucciones de "
+            "imágenes de **usuarios que no conozcas**."
+        )
+        embed = discord.Embed(
+            title="\N{NO ENTRY} Alerta de posible SCAM",
+            description=msg,
+            colour=WARNING_COLOR,
+        )
+        await self._msg_channel.send(embed=embed, delete_after=300)
+        return True
 
     async def mention_check(self, message):
         print("LOG: mention_check")
@@ -272,7 +417,13 @@ class FloodSpam(commands.Cog):
             f.write(f"{message}\n")
         self.messages.spam.add(message)
 
-    async def alert_moderation(self, title, reason):
+    def add_spam_image_hash(self, digest):
+        print("LOG: add_spam_image_hash")
+        with open(config.log_image_spam_file, "a") as f:
+            f.write(f"{digest}\n")
+        self.messages.image_spam.add(digest)
+
+    async def alert_moderation(self, title, reason, attachments=None):
         print("LOG: alert_moderation")
 
         d_msg = {
@@ -291,6 +442,15 @@ class FloodSpam(commands.Cog):
             "known": (
                 f"{self.coord_role.mention} Se detectó un mensaje previamente reconocido "
                 f"como spam de {self._msg_author_mention} y se ha muteado."
+            ),
+            "known_image": (
+                f"{self.coord_role.mention} Se detectó una imagen previamente reconocida "
+                f"como spam/scam de {self._msg_author_mention} y se ha muteado."
+            ),
+            "image_burst": (
+                f"{self.coord_role.mention} Se detectaron imágenes enviadas por "
+                f"{self._msg_author_mention} en varios canales en poco tiempo "
+                "(posible cuenta comprometida) y se ha muteado."
             ),
         }
         msg = d_msg[reason]
@@ -316,7 +476,29 @@ class FloodSpam(commands.Cog):
             ),
             inline=False,
         )
+        # Re-upload a sanitized copy of any flagged images so moderators can
+        # still see them in the thread after the original message gets
+        # deleted. Images from a compromised/malicious account are untrusted
+        # input, so they're decoded/re-encoded (stripping anything relying on
+        # a malformed file to exploit an image parser) and sent as a spoiler
+        # so viewing them requires an explicit click.
+        files = []
+        if attachments:
+            for attachment in attachments:
+                sanitized = await self._sanitize_attachment(attachment)
+                if sanitized is not None:
+                    files.append(sanitized)
+            embed.add_field(
+                name="\N{WARNING SIGN} Imágenes adjuntas",
+                value=(
+                    "Las imágenes fueron re-codificadas y se muestran como spoiler por "
+                    "provenir de una cuenta comprometida/no confiable. Ábrelas bajo tu "
+                    "propio criterio."
+                ),
+                inline=False,
+            )
+
         view = ModActionView(self._msg_author, self._muted_role)
         thread = await self.main_mod_channel.create_thread(name=f"{title} - {self._msg_author_mention}",
             auto_archive_duration=60, type=discord.ChannelType.public_thread)
-        await thread.send(embed=embed, view=view)
+        await thread.send(embed=embed, view=view, files=files)
