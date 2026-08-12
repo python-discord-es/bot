@@ -1,0 +1,116 @@
+from unittest.mock import MagicMock
+
+import discord
+
+from comandos.archivar import Archivar
+from tests.factories import (
+    bind_commands,
+    make_bot,
+    make_category,
+    make_ctx,
+    make_dm_channel,
+    make_message,
+    make_text_channel,
+)
+
+
+class TestArchivarCanal:
+    def test_writes_header_and_rows(self, tmp_path):
+        cog = Archivar(make_bot())
+        channel = make_text_channel(id=1, name="general")
+        messages = [
+            make_message(id=10, content="hola\ncon salto de linea", channel=channel),
+            make_message(id=11, content="segundo mensaje", channel=channel),
+        ]
+        target = tmp_path / "archivo.csv"
+
+        status = cog.archivar_canal(str(target), messages)
+
+        assert status == (True, str(target))
+        lines = target.read_text().splitlines()
+        assert lines[0].startswith("id;content;channel_id")
+        assert len(lines) == 3
+        # Newlines inside content are escaped, not left as real line breaks.
+        assert "hola\\ncon salto de linea" in lines[1]
+
+    def test_stops_and_returns_none_for_unsupported_channel_type(self, tmp_path):
+        cog = Archivar(make_bot())
+        messages = [make_message(id=1, channel=make_dm_channel())]
+        target = tmp_path / "archivo.csv"
+
+        assert cog.archivar_canal(str(target), messages) is None
+
+    def test_write_failure_returns_false_none(self, tmp_path):
+        cog = Archivar(make_bot())
+        messages = [make_message(id=1)]
+        # A directory can't be opened for writing as a file.
+        bad_target = tmp_path
+
+        assert cog.archivar_canal(str(bad_target), messages) == (False, None)
+
+    def test_failure_tuple_is_still_truthy(self, tmp_path):
+        """Documents a real footgun in archivar(): ``status = archivar_canal(...)``
+        followed by ``if status:`` treats a write failure as success, because
+        ``(False, None)`` is a non-empty tuple and therefore truthy in Python.
+        """
+        cog = Archivar(make_bot())
+        status = cog.archivar_canal(str(tmp_path), [make_message(id=1)])
+
+        assert status == (False, None)
+        assert bool(status) is True  # the actual footgun
+
+
+class TestArchivarCommand:
+    async def test_sends_success_embed_with_the_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mod_channel = make_text_channel(id=1, name="mod")
+        cog = bind_commands(Archivar(make_bot()))
+        cog.mod_channel = mod_channel
+
+        channel = make_text_channel(
+            id=2,
+            name="general",
+            history_messages=[make_message(id=1), make_message(id=2)],
+        )
+        ctx = make_ctx(channel=mod_channel)
+
+        await cog.archivar(ctx, channel=channel)
+
+        mod_channel.send.assert_awaited_once()
+        _, kwargs = mod_channel.send.call_args
+        assert "2 mensajes" in kwargs["embed"].description
+
+    async def test_sends_error_embed_when_archiving_fails(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mod_channel = make_text_channel(id=1, name="mod")
+        cog = bind_commands(Archivar(make_bot()))
+        cog.mod_channel = mod_channel
+
+        channel = make_text_channel(
+            id=2, name="general", history_messages=[make_message(id=1, channel=make_dm_channel())]
+        )
+        ctx = make_ctx(channel=mod_channel)
+
+        await cog.archivar(ctx, channel=channel)
+
+        mod_channel.send.assert_awaited_once()
+        (msg,), _ = mod_channel.send.call_args
+        assert "Error" in msg
+
+
+class TestArchivarCategoria:
+    async def test_only_archives_text_channels(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mod_channel = make_text_channel(id=1, name="mod")
+        cog = bind_commands(Archivar(make_bot()))
+        cog.mod_channel = mod_channel
+
+        text_channel = make_text_channel(id=2, name="canal-texto", history_messages=[])
+        voice_channel = MagicMock(spec=discord.VoiceChannel)
+        category = make_category(channels=[text_channel, voice_channel])
+        ctx = make_ctx(channel=mod_channel)
+
+        await cog.archivar_categoria(ctx, category=category)
+
+        # Only one embed sent - for the TextChannel. The VoiceChannel was skipped.
+        mod_channel.send.assert_awaited_once()

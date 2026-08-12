@@ -1,6 +1,6 @@
 import re
 import discord
-from datetime import datetime
+from datetime import datetime, timezone
 
 from configuration import Config
 
@@ -17,7 +17,7 @@ def get_moderation_channel(bot, channel_id):
 
 def get_message_to_moderate(message):
     msg = (
-        f"{datetime.utcnow()} UTC\n"
+        f"{datetime.now(timezone.utc).replace(tzinfo=None)} UTC\n"
         f"Mensaje enviado desde {message.channel.mention} por {message.author.mention}\n\n"
         f"```\n{message.content}\n```\n\n**¿Cumple con todos los requisitos?**\n\n"
         f"{aceptar_emoji} Para aceptarlo, envía el siguiente mensaje:\n\n"
