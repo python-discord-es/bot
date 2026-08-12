@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 
+import colors
 from configuration import Config
 from utils import get_moderation_channel
 
@@ -31,7 +32,7 @@ class Ayuda(commands.Cog):
     def get_mod_help(self):
         embed = discord.Embed(
             title="Comandos Disponibles",
-            colour=0x2B597B,
+            colour=colors.BRAND,
         )
         embed.add_field(
             name="`%mod`",
@@ -66,7 +67,7 @@ class Ayuda(commands.Cog):
     def get_main_help(self):
         embed = discord.Embed(
             title="Comandos Disponibles",
-            colour=0x2B597B,
+            colour=colors.BRAND,
         )
         embed.add_field(
             name='`%encuesta "pregunta"`',

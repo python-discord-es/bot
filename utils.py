@@ -2,6 +2,7 @@ import re
 import discord
 from datetime import datetime, timezone
 
+import colors
 from configuration import Config
 
 config = Config()
@@ -28,7 +29,7 @@ def get_message_to_moderate(message):
     embed = discord.Embed(
         title="Moderación de mensaje",
         description=msg,
-        colour=0x2B597B,
+        colour=colors.BRAND,
     )
 
     return embed

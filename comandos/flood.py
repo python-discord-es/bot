@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands, tasks
 from PIL import Image, UnidentifiedImageError
 
+import colors
 from configuration import Config
 from messages import Messages
 from utils import strip_message
@@ -32,8 +33,6 @@ SPAM_WORDS = [
     ("everyone", "free", "http"),
     ("gratis", "full", "youtube.com", "telegra.ph"),
 ]
-
-WARNING_COLOR = 0x2B597B
 
 # Modal view to 'ban' or 'remove role' from users that get reported
 # as spam.
@@ -156,7 +155,7 @@ class FloodSpam(commands.Cog):
             embed = discord.Embed(
                 title="\N{NO ENTRY} Alerta de posible SPAM",
                 description=msg,
-                colour=WARNING_COLOR,
+                colour=colors.BRAND,
             )
             await self._msg_channel.send(embed=embed, delete_after = 60)
 
@@ -172,7 +171,7 @@ class FloodSpam(commands.Cog):
             embed = discord.Embed(
                 title="\N{NO ENTRY} Alerta de posible SPAM",
                 description=msg,
-                colour=WARNING_COLOR,
+                colour=colors.BRAND,
             )
             await self._msg_channel.send(embed=embed, delete_after=300)
 
@@ -186,7 +185,7 @@ class FloodSpam(commands.Cog):
             embed = discord.Embed(
                 title="\N{NO ENTRY} Alerta de posible SCAM",
                 description=msg,
-                colour=WARNING_COLOR,
+                colour=colors.BRAND,
             )
             await self._msg_channel.send(embed=embed, delete_after = 300)
 
@@ -211,7 +210,7 @@ class FloodSpam(commands.Cog):
         embed = discord.Embed(
             title="\N{NO ENTRY} Alerta de posible SCAM",
             description=_msg,
-            colour=WARNING_COLOR,
+            colour=colors.BRAND,
         )
         # Send message notifying the user is muted
         await message.channel.send(embed=embed, delete_after = 300)
@@ -251,7 +250,7 @@ class FloodSpam(commands.Cog):
                     embed = discord.Embed(
                         title="\N{NO ENTRY} Alerta de posible SCAM",
                         description=_msg,
-                        colour=WARNING_COLOR,
+                        colour=colors.BRAND,
                     )
                     # Send message notifying the user is muted
                     await self._msg_channel.send(embed=embed, delete_after = 120)
@@ -331,7 +330,7 @@ class FloodSpam(commands.Cog):
                 embed = discord.Embed(
                     title="\N{NO ENTRY} Alerta de posible SPAM",
                     description=msg,
-                    colour=WARNING_COLOR,
+                    colour=colors.BRAND,
                 )
                 await self._msg_channel.send(embed=embed, delete_after=60)
                 return True
@@ -379,7 +378,7 @@ class FloodSpam(commands.Cog):
         embed = discord.Embed(
             title="\N{NO ENTRY} Alerta de posible SCAM",
             description=msg,
-            colour=WARNING_COLOR,
+            colour=colors.BRAND,
         )
         await self._msg_channel.send(embed=embed, delete_after=300)
         return True
@@ -406,7 +405,7 @@ class FloodSpam(commands.Cog):
         embed = discord.Embed(
             title="\N{NO ENTRY} Alerta de SPAM de menciones",
             description=_msg,
-            colour=WARNING_COLOR,
+            colour=colors.BRAND,
         )
         # Send message notifying the user is muted
         await self._msg_channel.send(embed=embed, delete_after = 300)
@@ -459,7 +458,7 @@ class FloodSpam(commands.Cog):
         embed = discord.Embed(
             title=f"\N{NO ENTRY} {title}",
             description=msg,
-            colour=WARNING_COLOR,
+            colour=colors.BRAND,
         )
         embed.add_field(name="Mensaje", value=f"`{repr(self._msg_content)[1:-1]}`", inline=False)
         embed.add_field(

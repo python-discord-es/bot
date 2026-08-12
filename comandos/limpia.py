@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
+import colors
 from configuration import Config
 
 config = Config()
@@ -50,7 +51,7 @@ class Limpia(commands.Cog):
             embed = discord.Embed(
                 title=f"Borrados '{limit}' mensajes\n\n",
                 description=f"Comando ejecuta por {ctx.author.mention}",
-                colour=0x178D38,
+                colour=colors.SUCCESS,
             )
             await ctx.send(embed=embed, ephemeral=True)
             await channel.purge(limit=1)

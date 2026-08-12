@@ -5,6 +5,7 @@ from typing import List, Optional
 import discord
 from discord.ext import commands
 
+import colors
 from configuration import Config
 
 config = Config()
@@ -36,7 +37,7 @@ class Archivar(commands.Cog):
             e = discord.Embed(
                 title="\N{PAGE FACING UP} Canal Archivado",
                 description=f"El canal {channel.mention} tiene {len(messages)} mensajes",
-                colour=0xFF0000,
+                colour=colors.ARCHIVE,
             )
             await self.mod_channel.send(embed=e, file=discord.File(archived_filename))
         else:

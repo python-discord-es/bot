@@ -10,13 +10,12 @@ import pandas as pd
 import discord
 from discord.ext import commands
 
+import colors
 from configuration import Config
 from utils import get_moderation_channel, get_message_to_moderate, aceptar_emoji, rechazar_emoji
 
 config = Config()
 logger = logging.getLogger(__name__)
-
-EMBED_COLOR = 0x2B597B
 
 
 def _encode_message(content: str) -> str:
@@ -261,7 +260,7 @@ class Moderacion(commands.Cog):
         embed = discord.Embed(
             title="Mensaje Enviado",
             description=f"Gracias {message.author.mention}, tu mensaje espera moderación.",
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         reply_msg = await ch_sub.send(embed=embed)
 
@@ -318,7 +317,7 @@ class Moderacion(commands.Cog):
         embed = discord.Embed(
             title="Mensaje rechazado",
             description=f"{vp.author.mention} tu mensaje necesita atención.",
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         embed.add_field(
             name="Razón rechazado",
@@ -342,7 +341,7 @@ class Moderacion(commands.Cog):
         messages = False
         embed = discord.Embed(
             title="Mensajes pendientes de moderación",
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         for idx, mod_row in data.iterrows():
             author = self.bot.get_user(int(mod_row["author_id"]))
@@ -394,6 +393,6 @@ class Moderacion(commands.Cog):
                 f"**ID:** {mod_row['message_id'].values[0]}\n"
                 f"**Mensaje:**\n```\n{m_message}\n```\n"
             ),
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         await channel_mod.send(embed=embed)
