@@ -111,10 +111,6 @@ class Moderacion(commands.Cog):
     def _is_bot(self, ctx) -> bool:
         return self._resolve_author(ctx).id == config.BOT_ID
 
-    def _is_valid_channel(self, ctx) -> bool:
-        channel_mod = self.bot.get_channel(ctx.channel.id)
-        return channel_mod.id == ctx.message.channel.id
-
     def get_channels_main_mod_sub(self, channel_id):
         channel_main = self.bot.get_channel(self.channels[channel_id]["main"])
         channel_mod = self.bot.get_channel(self.channels[channel_id]["mod"])
@@ -148,7 +144,7 @@ class Moderacion(commands.Cog):
         - Resolves channels and decodes the message
         Returns a ValidatedPost or None if any step fails.
         """
-        if self._is_bot(ctx) or not self._is_valid_channel(ctx):
+        if self._is_bot(ctx):
             return None
 
         channel_mod = self.bot.get_channel(ctx.channel.id)
@@ -363,7 +359,7 @@ class Moderacion(commands.Cog):
     @commands.command(name="mod", help="Comando para listar los mensajes pendientes")
     @commands.has_role(config.MOD_ROLE)
     async def mostrar_mensajes(self, ctx):
-        if self._is_bot(ctx) or not self._is_valid_channel(ctx):
+        if self._is_bot(ctx):
             return
 
         channel_mod = self.bot.get_channel(ctx.channel.id)

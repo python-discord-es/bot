@@ -76,13 +76,6 @@ class TestIsBot:
         assert moderacion_cog._is_bot(ctx) is False
 
 
-class TestIsValidChannel:
-    def test_true_when_channel_is_registered_on_the_bot(self, moderacion_cog, moderacion_channels):
-        ctx = make_ctx(channel=moderacion_channels["mod"])
-
-        assert moderacion_cog._is_valid_channel(ctx) is True
-
-
 class TestGetChannelsMainModSub:
     def test_resolves_the_three_channels(self, moderacion_cog, moderacion_channels):
         main, mod, sub = moderacion_cog.get_channels_main_mod_sub(moderacion_channels["sub"].id)

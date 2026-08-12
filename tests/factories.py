@@ -152,9 +152,6 @@ def make_interaction(user=None, channel=None):
     interaction = MagicMock(spec=discord.Interaction)
     interaction.user = user if user is not None else make_member()
     interaction.channel = channel if channel is not None else make_text_channel()
-    # `_is_valid_channel` compares `channel_mod.id == ctx.message.channel.id`
-    # even for interactions, so this needs to line up with `.channel` too.
-    interaction.message = SimpleNamespace(channel=interaction.channel)
     interaction.response = MagicMock()
     interaction.response.send_message = AsyncMock()
     interaction.response.send_modal = AsyncMock()
