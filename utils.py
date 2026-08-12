@@ -11,10 +11,6 @@ config = Config()
 aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
 rechazar_emoji = "\N{CROSS MARK}"
 
-def get_moderation_channel(bot, channel_id):
-    channel_mod = bot.get_channel(channel_id)
-    return channel_mod
-
 
 def get_message_to_moderate(message):
     msg = (

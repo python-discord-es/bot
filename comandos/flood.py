@@ -11,7 +11,6 @@ from PIL import Image, UnidentifiedImageError
 
 import colors
 from configuration import Config
-from messages import Messages
 from utils import strip_message
 
 from typing import Optional
@@ -91,11 +90,12 @@ class FloodSpam(commands.Cog):
         self.bot = bot
         self._main_mod_channel: Optional[discord.TextChannel] = None
 
-        self.messages = Messages()
-        self.messages.spam = config.get_spam_messages()
-        self.messages.normal = {}
-        self.messages.image_spam = config.get_spam_image_hashes()
-        self.messages.image_authors = {}
+        # Known spam/scam text and image hashes, plus the short-lived
+        # per-author tracking used to detect floods and image bursts.
+        self.spam = config.get_spam_messages()
+        self.normal = {}
+        self.image_spam = config.get_spam_image_hashes()
+        self.image_authors = {}
         self.guild = None
 
         self._coord_role: Optional[discord.Role] = None
@@ -136,8 +136,8 @@ class FloodSpam(commands.Cog):
     # Remove messages every hour
     @tasks.loop(seconds=60 * 30)
     async def clear_messages(self):
-        self.messages.normal = {}
-        self.messages.image_authors = {}
+        self.normal = {}
+        self.image_authors = {}
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -164,7 +164,7 @@ class FloodSpam(commands.Cog):
         if await self.flood_check(ctx):
             return
 
-        if ctx.content in self.messages.spam:
+        if ctx.content in self.spam:
             await self.alert_moderation(
                 ctx,
                 "Alerta de SPAM (Mensaje conocido)",
@@ -248,14 +248,14 @@ class FloodSpam(commands.Cog):
         if not ctx.content:
             return False
 
-        if ctx.author not in self.messages.normal:
-            self.messages.normal[ctx.author] = {ctx.content: 1}
+        if ctx.author not in self.normal:
+            self.normal[ctx.author] = {ctx.content: 1}
         else:
-            if ctx.content not in self.messages.normal[ctx.author]:
-                self.messages.normal[ctx.author][ctx.content] = 1
+            if ctx.content not in self.normal[ctx.author]:
+                self.normal[ctx.author][ctx.content] = 1
             else:
-                self.messages.normal[ctx.author][ctx.content] += 1
-                if self.messages.normal[ctx.author][ctx.content] >= config.FLOOD_LIMIT:
+                self.normal[ctx.author][ctx.content] += 1
+                if self.normal[ctx.author][ctx.content] >= config.FLOOD_LIMIT:
                     self.add_spam_message(ctx.content)
                     await self.alert_moderation(
                         ctx,
@@ -267,7 +267,7 @@ class FloodSpam(commands.Cog):
                     await ctx.author.add_roles(self.muted_role)
 
                     # Reset author counters
-                    self.messages.normal[ctx.author] = {}
+                    self.normal[ctx.author] = {}
 
                     _msg = (
                         f"Usuario {ctx.author_mention} silenciado por enviar mensajes "
@@ -338,7 +338,7 @@ class FloodSpam(commands.Cog):
         # Fast path: any image already known to be spam/scam
         for data in image_bytes:
             digest = self._hash_bytes(data)
-            if digest in self.messages.image_spam:
+            if digest in self.image_spam:
                 await self.alert_moderation(
                     ctx,
                     "Alerta de SPAM (Imagen conocida)",
@@ -368,14 +368,14 @@ class FloodSpam(commands.Cog):
 
         # Burst path: same author, 2+ images, 2+ different channels, short window
         now = time.time()
-        channels = self.messages.image_authors.get(ctx.author, {})
+        channels = self.image_authors.get(ctx.author, {})
         channels = {
             channel_id: ts
             for channel_id, ts in channels.items()
             if now - ts <= config.IMAGE_BURST_WINDOW
         }
         channels[ctx.channel.id] = now
-        self.messages.image_authors[ctx.author] = channels
+        self.image_authors[ctx.author] = channels
 
         if len(channels) < 2:
             return False
@@ -395,7 +395,7 @@ class FloodSpam(commands.Cog):
             self.add_spam_image_hash(self._hash_bytes(data))
 
         # Reset author's channel tracking now that we've acted on it
-        self.messages.image_authors[ctx.author] = {}
+        self.image_authors[ctx.author] = {}
 
         await discord.Message.delete(ctx.message)
         msg = (
@@ -447,13 +447,13 @@ class FloodSpam(commands.Cog):
         logger.info("add_spam_message: %r", message)
         with open(config.log_spam_file, "a") as f:
             f.write(f"{message}\n")
-        self.messages.spam.add(message)
+        self.spam.add(message)
 
     def add_spam_image_hash(self, digest):
         logger.info("add_spam_image_hash: %s", digest)
         with open(config.log_image_spam_file, "a") as f:
             f.write(f"{digest}\n")
-        self.messages.image_spam.add(digest)
+        self.image_spam.add(digest)
 
     async def alert_moderation(self, ctx: MessageContext, title, reason, image_bytes=None):
         logger.debug("alert_moderation: %s (%s)", title, reason)

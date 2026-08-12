@@ -58,7 +58,7 @@ class TestFloodCheck:
         ctx = make_context(make_message(content=""))
 
         assert await flood_cog.flood_check(ctx) is False
-        assert flood_cog.messages.normal == {}
+        assert flood_cog.normal == {}
 
     async def test_below_flood_limit_does_not_mute(self, flood_cog, config):
         member = make_member(name="repetidor")
@@ -79,9 +79,9 @@ class TestFloodCheck:
             await flood_cog.flood_check(ctx)
 
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
-        assert "hola hola hola" in flood_cog.messages.spam
+        assert "hola hola hola" in flood_cog.spam
         # Counter resets after muting
-        assert flood_cog.messages.normal[member] == {}
+        assert flood_cog.normal[member] == {}
         # Repeated messages are behavioral spam, not a scam-link detection -
         # the public notice should say so consistently with the other
         # behavioral checks (mentions, known text/images).
@@ -147,7 +147,7 @@ class TestAttachmentCheckFastPath:
     ):
         data = make_png_bytes()
         digest = __import__("hashlib").sha256(data).hexdigest()
-        flood_cog.messages.image_spam.add(digest)
+        flood_cog.image_spam.add(digest)
 
         member = make_member(name="reincidente")
         message = make_message(
@@ -269,8 +269,8 @@ class TestAttachmentCheckBurstPath:
 
         import hashlib
 
-        assert hashlib.sha256(data_a).hexdigest() in flood_cog.messages.image_spam
-        assert hashlib.sha256(data_b).hexdigest() in flood_cog.messages.image_spam
+        assert hashlib.sha256(data_a).hexdigest() in flood_cog.image_spam
+        assert hashlib.sha256(data_b).hexdigest() in flood_cog.image_spam
 
     async def test_outside_burst_window_does_not_trigger(self, flood_cog, config, monkeypatch):
         import comandos.flood as flood_module
@@ -347,13 +347,13 @@ class TestAddSpamHelpers:
     def test_add_spam_message_persists_and_caches(self, flood_cog, isolated_logs):
         flood_cog.add_spam_message("mensaje malo")
 
-        assert "mensaje malo" in flood_cog.messages.spam
+        assert "mensaje malo" in flood_cog.spam
         assert "mensaje malo" in isolated_logs.log_spam_file.read_text()
 
     def test_add_spam_image_hash_persists_and_caches(self, flood_cog, isolated_logs):
         flood_cog.add_spam_image_hash("deadbeef")
 
-        assert "deadbeef" in flood_cog.messages.image_spam
+        assert "deadbeef" in flood_cog.image_spam
         assert "deadbeef" in isolated_logs.log_image_spam_file.read_text()
 
 
@@ -481,7 +481,7 @@ class TestOnMessagePipeline:
 
         # Never even gets far enough to build a MessageContext or touch state.
         message.channel.send.assert_not_awaited()
-        assert flood_cog.messages.image_authors == {}
+        assert flood_cog.image_authors == {}
 
     async def test_short_caption_with_attachments_is_still_processed(self, flood_cog):
         member = make_member(name="alguien")
@@ -496,7 +496,7 @@ class TestOnMessagePipeline:
         # It went through the pipeline (attachment_check saw it and recorded
         # this channel for the burst-tracking window), even though the
         # caption alone would have been skipped.
-        assert member in flood_cog.messages.image_authors
+        assert member in flood_cog.image_authors
 
     async def test_skips_coordination_role_members(self, flood_cog):
         message = make_message(
@@ -511,7 +511,7 @@ class TestOnMessagePipeline:
     async def test_known_spam_text_is_deleted_and_author_muted(
         self, flood_cog, patched_message_delete
     ):
-        flood_cog.messages.spam.add("mensaje ya conocido como spam")
+        flood_cog.spam.add("mensaje ya conocido como spam")
         member = make_member(name="repetidor")
         message = make_message(content="Mensaje YA conocido como SPAM", author=member)
 

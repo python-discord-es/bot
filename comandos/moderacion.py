@@ -12,7 +12,7 @@ from discord.ext import commands
 
 import colors
 from configuration import Config
-from utils import get_moderation_channel, get_message_to_moderate, aceptar_emoji, rechazar_emoji
+from utils import get_message_to_moderate, aceptar_emoji, rechazar_emoji
 
 config = Config()
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class Moderacion(commands.Cog):
         return self._resolve_author(ctx).id == config.BOT_ID
 
     def _is_valid_channel(self, ctx) -> bool:
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
         return channel_mod.id == ctx.message.channel.id
 
     def get_channels_main_mod_sub(self, channel_id):
@@ -125,7 +125,7 @@ class Moderacion(commands.Cog):
         self, ctx, message_id: Optional[int], command_name: str
     ) -> Optional[str]:
         """Parse and validate the post_id from interaction or command message."""
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
 
         if isinstance(ctx, discord.Interaction) and message_id is not None:
             return str(message_id)
@@ -151,7 +151,7 @@ class Moderacion(commands.Cog):
         if self._is_bot(ctx) or not self._is_valid_channel(ctx):
             return None
 
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
 
         post_id = await self._parse_post_id(ctx, message_id, command_name)
         if post_id is None:
@@ -366,7 +366,7 @@ class Moderacion(commands.Cog):
         if self._is_bot(ctx) or not self._is_valid_channel(ctx):
             return
 
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
         _post = ctx.message.content.replace("%mod", "").strip().split()
 
         if not _post:

@@ -3,7 +3,6 @@ from discord.ext import commands
 
 import colors
 from configuration import Config
-from utils import get_moderation_channel
 
 config = Config()
 
@@ -20,7 +19,7 @@ class Ayuda(commands.Cog):
 
         # Check which channel combination we are using from the
         # configuration information
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
 
         if channel_mod:
             e = self.get_mod_help()
