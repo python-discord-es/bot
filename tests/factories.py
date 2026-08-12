@@ -201,11 +201,11 @@ def bind_commands(cog):
     return cog
 
 
-def prime_cog(cog, message):
-    """Mirror the attribute setup ``FloodSpam.on_message`` does before
-    delegating to its individual ``*_check`` methods, so those methods can
-    be unit-tested directly without going through the full listener."""
-    cog._msg_channel = message.channel
-    cog._msg_content = strip_message(message.content)
-    cog._msg_author = message.author
-    cog._msg_author_mention = message.author.mention
+def make_context(message):
+    """Build the ``MessageContext`` ``FloodSpam.on_message`` would build
+    before delegating to its individual ``*_check`` methods, so those
+    methods can be unit-tested directly without going through the full
+    listener."""
+    from comandos.flood import MessageContext
+
+    return MessageContext(message=message, content=strip_message(message.content))

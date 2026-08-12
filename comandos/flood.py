@@ -2,6 +2,7 @@ import hashlib
 import logging
 import time
 
+from dataclasses import dataclass
 from io import BytesIO
 
 import discord
@@ -33,6 +34,38 @@ SPAM_WORDS = [
     ("everyone", "free", "http"),
     ("gratis", "full", "youtube.com", "telegra.ph"),
 ]
+
+
+@dataclass(frozen=True)
+class MessageContext:
+    """Per-message state, threaded explicitly through the ``*_check``
+    methods and ``alert_moderation`` as a parameter.
+
+    This used to live on shared ``FloodSpam`` instance attributes
+    (``self._msg_channel``/``_msg_content``/``_msg_author``/
+    ``_msg_author_mention``), set once at the top of ``on_message`` and
+    read back by whichever check ran next. That made those methods hard
+    to call/test independently, and - since real handling has plenty of
+    ``await`` points in between - a second ``on_message`` call for a
+    *different* message running concurrently could overwrite that shared
+    state while the first call was still relying on it.
+    """
+
+    message: discord.Message
+    content: str  # message.content, stripped via strip_message()
+
+    @property
+    def channel(self):
+        return self.message.channel
+
+    @property
+    def author(self):
+        return self.message.author
+
+    @property
+    def author_mention(self):
+        return self.message.author.mention
+
 
 # Modal view to 'ban' or 'remove role' from users that get reported
 # as spam.
@@ -67,11 +100,6 @@ class FloodSpam(commands.Cog):
 
         self._coord_role: Optional[discord.Role] = None
         self._muted_role: Optional[discord.Role] = None
-
-        self._msg_channel: Optional[discord.TextChannel | discord.ForumChannel | discord.VoiceChannel] = None
-        self._msg_content: Optional[str] = None
-        self._msg_author: Optional[discord.Member] = None
-        self._msg_author_mention: Optional[str] = None
 
     @property
     def muted_role(self) -> discord.Role:
@@ -123,33 +151,32 @@ class FloodSpam(commands.Cog):
         # (e.g. an image-only spam message has no text at all).
         if len(message.content) < 5 and not message.attachments:
             return
-        self._msg_channel = message.channel
-        self._msg_content = strip_message(message.content)
-        self._msg_author = message.author
-        self._msg_author_mention = self._msg_author.mention
+
+        ctx = MessageContext(message=message, content=strip_message(message.content))
 
         # skip coord role
-        if self.coord_role in self._msg_author.roles:
+        if self.coord_role in ctx.author.roles:
             return
 
-        if await self.attachment_check(message):
+        if await self.attachment_check(ctx):
             return
 
-        if await self.flood_check(message):
+        if await self.flood_check(ctx):
             return
 
-        if self._msg_content in self.messages.spam:
+        if ctx.content in self.messages.spam:
             await self.alert_moderation(
+                ctx,
                 "Alerta de SPAM (Mensaje conocido)",
                 "known",
             )
 
             # Set muted role
-            await self._msg_author.add_roles(self.muted_role)
+            await ctx.author.add_roles(self.muted_role)
 
             await discord.Message.delete(message)
             msg = (
-                f"El mensaje del usuario {self._msg_author_mention} fue borrado por ser un "
+                f"El mensaje del usuario {ctx.author_mention} fue borrado por ser un "
                 "mensaje detectado previamente como spam.\n"
             )
             embed = discord.Embed(
@@ -157,14 +184,14 @@ class FloodSpam(commands.Cog):
                 description=msg,
                 colour=colors.BRAND,
             )
-            await self._msg_channel.send(embed=embed, delete_after = 60)
+            await ctx.channel.send(embed=embed, delete_after = 60)
 
         # Check first more than 3 mentions
-        if await self.mention_check(message):
-            self.add_spam_message(self._msg_content)
+        if await self.mention_check(ctx):
+            self.add_spam_message(ctx.content)
             await discord.Message.delete(message)
             msg = (
-                f"El mensaje del usuario {self._msg_author_mention} fue borrado por tener muchas "
+                f"El mensaje del usuario {ctx.author_mention} fue borrado por tener muchas "
                 "menciones y podría ser un engaño.\nEvita `hacer click` en enlaces de "
                 "**usuarios que no conozcas**."
             )
@@ -173,13 +200,13 @@ class FloodSpam(commands.Cog):
                 description=msg,
                 colour=colors.BRAND,
             )
-            await self._msg_channel.send(embed=embed, delete_after=300)
+            await ctx.channel.send(embed=embed, delete_after=300)
 
-        if await self.spam_check(message):
-            self.add_spam_message(self._msg_content)
+        if await self.spam_check(ctx):
+            self.add_spam_message(ctx.content)
             await discord.Message.delete(message)
             msg = (
-                f"El mensaje del usuario {self._msg_author_mention} fue borrado y podría ser "
+                f"El mensaje del usuario {ctx.author_mention} fue borrado y podría ser "
                 "un engaño.\nEvita `hacer click` en enlaces de **usuarios que no conozcas**."
             )
             embed = discord.Embed(
@@ -187,24 +214,22 @@ class FloodSpam(commands.Cog):
                 description=msg,
                 colour=colors.BRAND,
             )
-            await self._msg_channel.send(embed=embed, delete_after = 300)
+            await ctx.channel.send(embed=embed, delete_after = 300)
 
-    async def spam_check(self, message: discord.Message):
-        author = message.author
-
-        if not isinstance(author, discord.Member):
+    async def spam_check(self, ctx: MessageContext):
+        if not isinstance(ctx.author, discord.Member):
             return
 
-        if not any(all(i in message.content for i in sw) for sw in SPAM_WORDS):
+        if not any(all(i in ctx.message.content for i in sw) for sw in SPAM_WORDS):
             return False
 
-        await self.alert_moderation("Alerta de SCAM", "scam")
+        await self.alert_moderation(ctx, "Alerta de SCAM", "scam")
 
         # Set muted role
-        await author.add_roles(self.muted_role)
+        await ctx.author.add_roles(self.muted_role)
 
         _msg = (
-            f"Usuario {author.mention} silenciado por compartir un mensaje que "
+            f"Usuario {ctx.author_mention} silenciado por compartir un mensaje que "
             "parece contener enlaces de engaño. El equipo de coordinación ha sido notificado."
         )
         embed = discord.Embed(
@@ -213,38 +238,39 @@ class FloodSpam(commands.Cog):
             colour=colors.BRAND,
         )
         # Send message notifying the user is muted
-        await message.channel.send(embed=embed, delete_after = 300)
+        await ctx.channel.send(embed=embed, delete_after = 300)
         return True
 
-    async def flood_check(self, message):
-        logger.debug("flood_check: %s", message.id)
+    async def flood_check(self, ctx: MessageContext):
+        logger.debug("flood_check: %s", ctx.message.id)
 
         # Textless (image-only) messages are handled by attachment_check
-        if not self._msg_content:
+        if not ctx.content:
             return False
 
-        if self._msg_author not in self.messages.normal:
-            self.messages.normal[self._msg_author] = {self._msg_content: 1}
+        if ctx.author not in self.messages.normal:
+            self.messages.normal[ctx.author] = {ctx.content: 1}
         else:
-            if self._msg_content not in self.messages.normal[self._msg_author]:
-                self.messages.normal[self._msg_author][self._msg_content] = 1
+            if ctx.content not in self.messages.normal[ctx.author]:
+                self.messages.normal[ctx.author][ctx.content] = 1
             else:
-                self.messages.normal[self._msg_author][self._msg_content] += 1
-                if self.messages.normal[self._msg_author][self._msg_content] >= config.FLOOD_LIMIT:
-                    self.add_spam_message(self._msg_content)
+                self.messages.normal[ctx.author][ctx.content] += 1
+                if self.messages.normal[ctx.author][ctx.content] >= config.FLOOD_LIMIT:
+                    self.add_spam_message(ctx.content)
                     await self.alert_moderation(
+                        ctx,
                         "Alerta de Flood",
                         "flood",
                     )
 
                     # Set muted role
-                    await self._msg_author.add_roles(self.muted_role)
+                    await ctx.author.add_roles(self.muted_role)
 
                     # Reset author counters
-                    self.messages.normal[self._msg_author] = {}
+                    self.messages.normal[ctx.author] = {}
 
                     _msg = (
-                        f"Usuario {self._msg_author_mention} silenciado por enviar mensajes "
+                        f"Usuario {ctx.author_mention} silenciado por enviar mensajes "
                         "repetitivos. El equipo de coordinación ha sido notificado."
                     )
                     embed = discord.Embed(
@@ -253,7 +279,7 @@ class FloodSpam(commands.Cog):
                         colour=colors.BRAND,
                     )
                     # Send message notifying the user is muted
-                    await self._msg_channel.send(embed=embed, delete_after = 120)
+                    await ctx.channel.send(embed=embed, delete_after = 120)
 
     @staticmethod
     def _hash_bytes(data: bytes) -> str:
@@ -283,7 +309,7 @@ class FloodSpam(commands.Cog):
             logger.warning("_sanitize_bytes: could not decode image, skipping")
             return None
 
-    async def attachment_check(self, message: discord.Message) -> bool:
+    async def attachment_check(self, ctx: MessageContext) -> bool:
         """Detect image-based spam/scam bursts from (often compromised) accounts.
 
         Two mechanisms:
@@ -295,10 +321,10 @@ class FloodSpam(commands.Cog):
           same images across the server. When this fires, the offending
           images are hashed and cached for the fast path above.
         """
-        logger.debug("attachment_check: %s", message.id)
+        logger.debug("attachment_check: %s", ctx.message.id)
 
         images = [
-            a for a in message.attachments
+            a for a in ctx.message.attachments
             if (a.content_type or "").startswith("image/")
         ]
         if not images:
@@ -314,17 +340,18 @@ class FloodSpam(commands.Cog):
             digest = self._hash_bytes(data)
             if digest in self.messages.image_spam:
                 await self.alert_moderation(
+                    ctx,
                     "Alerta de SPAM (Imagen conocida)",
                     "known_image",
                     image_bytes=image_bytes,
                 )
 
                 # Set muted role
-                await self._msg_author.add_roles(self.muted_role)
+                await ctx.author.add_roles(self.muted_role)
 
-                await discord.Message.delete(message)
+                await discord.Message.delete(ctx.message)
                 msg = (
-                    f"El mensaje del usuario {self._msg_author_mention} fue borrado por "
+                    f"El mensaje del usuario {ctx.author_mention} fue borrado por "
                     "contener una imagen detectada previamente como spam.\nEl equipo de "
                     "coordinación ha sido notificado."
                 )
@@ -333,7 +360,7 @@ class FloodSpam(commands.Cog):
                     description=msg,
                     colour=colors.BRAND,
                 )
-                await self._msg_channel.send(embed=embed, delete_after=60)
+                await ctx.channel.send(embed=embed, delete_after=60)
                 return True
 
         if len(images) < config.IMAGE_ATTACHMENT_LIMIT:
@@ -341,37 +368,38 @@ class FloodSpam(commands.Cog):
 
         # Burst path: same author, 2+ images, 2+ different channels, short window
         now = time.time()
-        channels = self.messages.image_authors.get(self._msg_author, {})
+        channels = self.messages.image_authors.get(ctx.author, {})
         channels = {
             channel_id: ts
             for channel_id, ts in channels.items()
             if now - ts <= config.IMAGE_BURST_WINDOW
         }
-        channels[message.channel.id] = now
-        self.messages.image_authors[self._msg_author] = channels
+        channels[ctx.channel.id] = now
+        self.messages.image_authors[ctx.author] = channels
 
         if len(channels) < 2:
             return False
 
         await self.alert_moderation(
+            ctx,
             "Alerta de SPAM (Imágenes en varios canales)",
             "image_burst",
             image_bytes=image_bytes,
         )
 
         # Set muted role
-        await self._msg_author.add_roles(self.muted_role)
+        await ctx.author.add_roles(self.muted_role)
 
         # Cache the images involved so future occurrences hit the fast path
         for data in image_bytes:
             self.add_spam_image_hash(self._hash_bytes(data))
 
         # Reset author's channel tracking now that we've acted on it
-        self.messages.image_authors[self._msg_author] = {}
+        self.messages.image_authors[ctx.author] = {}
 
-        await discord.Message.delete(message)
+        await discord.Message.delete(ctx.message)
         msg = (
-            f"El mensaje del usuario {self._msg_author_mention} fue borrado por compartir "
+            f"El mensaje del usuario {ctx.author_mention} fue borrado por compartir "
             "imágenes en varios canales en poco tiempo, lo cual podría indicar una cuenta "
             "comprometida.\nEvita **hacer click** en enlaces o seguir instrucciones de "
             "imágenes de **usuarios que no conozcas**.\nEl equipo de coordinación ha sido "
@@ -382,26 +410,27 @@ class FloodSpam(commands.Cog):
             description=msg,
             colour=colors.BRAND,
         )
-        await self._msg_channel.send(embed=embed, delete_after=300)
+        await ctx.channel.send(embed=embed, delete_after=300)
         return True
 
-    async def mention_check(self, message):
-        logger.debug("mention_check: %s", message.id)
+    async def mention_check(self, ctx: MessageContext):
+        logger.debug("mention_check: %s", ctx.message.id)
 
         # Skip if 2 mentions or less
-        if (len(message.mentions) + len(message.role_mentions)) < config.MENTIONS_LIMIT:
+        if (len(ctx.message.mentions) + len(ctx.message.role_mentions)) < config.MENTIONS_LIMIT:
             return False
 
         await self.alert_moderation(
+            ctx,
             "Alerta de Flood (Menciones)",
             "menciones",
         )
 
         # Set muted role
-        await self._msg_author.add_roles(self.muted_role)
+        await ctx.author.add_roles(self.muted_role)
 
         _msg = (
-            f"Usuario {self._msg_author_mention} silenciado por hacer muchas menciones. "
+            f"Usuario {ctx.author_mention} silenciado por hacer muchas menciones. "
             "El equipo de coordinación ha sido notificado."
         )
         embed = discord.Embed(
@@ -410,7 +439,7 @@ class FloodSpam(commands.Cog):
             colour=colors.BRAND,
         )
         # Send message notifying the user is muted
-        await self._msg_channel.send(embed=embed, delete_after = 300)
+        await ctx.channel.send(embed=embed, delete_after = 300)
 
         return True
 
@@ -426,33 +455,33 @@ class FloodSpam(commands.Cog):
             f.write(f"{digest}\n")
         self.messages.image_spam.add(digest)
 
-    async def alert_moderation(self, title, reason, image_bytes=None):
+    async def alert_moderation(self, ctx: MessageContext, title, reason, image_bytes=None):
         logger.debug("alert_moderation: %s (%s)", title, reason)
 
         d_msg = {
             "menciones": (
                 f"{self.coord_role.mention} Se detectó un mensaje con muchas menciones "
-                f"de {self._msg_author_mention} y se ha muteado."
+                f"de {ctx.author_mention} y se ha muteado."
             ),
             "flood": (
                 f"{self.coord_role.mention} Se detectaron mensajes repetitivos de "
-                f"{self._msg_author_mention} y se ha muteado."
+                f"{ctx.author_mention} y se ha muteado."
             ),
             "scam": (
                 f"{self.coord_role.mention} Se detectó un mensaje de SCAM de "
-                f"{self._msg_author_mention} y se ha muteado."
+                f"{ctx.author_mention} y se ha muteado."
             ),
             "known": (
                 f"{self.coord_role.mention} Se detectó un mensaje previamente reconocido "
-                f"como spam de {self._msg_author_mention} y se ha muteado."
+                f"como spam de {ctx.author_mention} y se ha muteado."
             ),
             "known_image": (
                 f"{self.coord_role.mention} Se detectó una imagen previamente reconocida "
-                f"como spam/scam de {self._msg_author_mention} y se ha muteado."
+                f"como spam/scam de {ctx.author_mention} y se ha muteado."
             ),
             "image_burst": (
                 f"{self.coord_role.mention} Se detectaron imágenes enviadas por "
-                f"{self._msg_author_mention} en varios canales en poco tiempo "
+                f"{ctx.author_mention} en varios canales en poco tiempo "
                 "(posible cuenta comprometida) y se ha muteado."
             ),
         }
@@ -465,7 +494,7 @@ class FloodSpam(commands.Cog):
         # Escape backticks so message content can't break out of the inline
         # code span (repr(...)[1:-1] used to do this by stripping repr's
         # quote characters - fragile, and didn't actually escape backticks).
-        safe_content = self._msg_content.replace("`", "'") if self._msg_content else "(sin texto)"
+        safe_content = ctx.content.replace("`", "'") if ctx.content else "(sin texto)"
         embed.add_field(name="Mensaje", value=f"`{safe_content}`", inline=False)
         embed.add_field(
             name="En caso de ser spam",
@@ -505,7 +534,7 @@ class FloodSpam(commands.Cog):
                 inline=False,
             )
 
-        view = ModActionView(self._msg_author, self._muted_role)
-        thread = await self.main_mod_channel.create_thread(name=f"{title} - {self._msg_author_mention}",
+        view = ModActionView(ctx.author, self._muted_role)
+        thread = await self.main_mod_channel.create_thread(name=f"{title} - {ctx.author_mention}",
             auto_archive_duration=60, type=discord.ChannelType.public_thread)
         await thread.send(embed=embed, view=view, files=files)

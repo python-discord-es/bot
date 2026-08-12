@@ -5,11 +5,11 @@ import pytest
 
 from tests.factories import (
     make_attachment,
+    make_context,
     make_member,
     make_message,
     make_png_bytes,
     make_text_channel,
-    prime_cog,
 )
 
 
@@ -20,13 +20,14 @@ class TestSpamCheck:
     async def test_ignores_non_member_author(self, flood_cog):
         message = make_message(content="discord nitro free http://evil")
         message.author = object()  # not a discord.Member
+        ctx = make_context(message)
 
-        assert await flood_cog.spam_check(message) is None
+        assert await flood_cog.spam_check(ctx) is None
 
     async def test_no_match_returns_false(self, flood_cog):
-        message = make_message(content="hola a todos, buen dia")
+        ctx = make_context(make_message(content="hola a todos, buen dia"))
 
-        assert await flood_cog.spam_check(message) is False
+        assert await flood_cog.spam_check(ctx) is False
 
     @pytest.mark.parametrize(
         "content",
@@ -38,9 +39,9 @@ class TestSpamCheck:
     async def test_match_mutes_and_notifies(self, flood_cog, content):
         member = make_member(name="victima")
         message = make_message(content=content, author=member)
-        prime_cog(flood_cog, message)
+        ctx = make_context(message)
 
-        result = await flood_cog.spam_check(message)
+        result = await flood_cog.spam_check(ctx)
 
         assert result is True
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
@@ -54,29 +55,28 @@ class TestSpamCheck:
 # ---------------------------------------------------------------------------
 class TestFloodCheck:
     async def test_empty_content_is_a_noop(self, flood_cog):
-        message = make_message(content="")
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message(content=""))
 
-        assert await flood_cog.flood_check(message) is False
+        assert await flood_cog.flood_check(ctx) is False
         assert flood_cog.messages.normal == {}
 
     async def test_below_flood_limit_does_not_mute(self, flood_cog, config):
         member = make_member(name="repetidor")
         message = make_message(content="hola hola hola", author=member)
-        prime_cog(flood_cog, message)
+        ctx = make_context(message)
 
         for _ in range(config.FLOOD_LIMIT - 1):
-            await flood_cog.flood_check(message)
+            await flood_cog.flood_check(ctx)
 
         member.add_roles.assert_not_awaited()
 
     async def test_reaching_flood_limit_mutes_and_caches(self, flood_cog, config):
         member = make_member(name="repetidor")
         message = make_message(content="hola hola hola", author=member)
-        prime_cog(flood_cog, message)
+        ctx = make_context(message)
 
         for _ in range(config.FLOOD_LIMIT):
-            await flood_cog.flood_check(message)
+            await flood_cog.flood_check(ctx)
 
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
         assert "hola hola hola" in flood_cog.messages.spam
@@ -94,13 +94,11 @@ class TestFloodCheck:
         bob = make_member(name="bob", id=2)
 
         for _ in range(config.FLOOD_LIMIT - 1):
-            msg = make_message(content="mismo mensaje", author=alice)
-            prime_cog(flood_cog, msg)
-            await flood_cog.flood_check(msg)
+            ctx = make_context(make_message(content="mismo mensaje", author=alice))
+            await flood_cog.flood_check(ctx)
 
-        msg = make_message(content="mismo mensaje", author=bob)
-        prime_cog(flood_cog, msg)
-        await flood_cog.flood_check(msg)
+        ctx = make_context(make_message(content="mismo mensaje", author=bob))
+        await flood_cog.flood_check(ctx)
 
         alice.add_roles.assert_not_awaited()
         bob.add_roles.assert_not_awaited()
@@ -112,28 +110,27 @@ class TestFloodCheck:
 class TestMentionCheck:
     async def test_below_limit_returns_false(self, flood_cog, config):
         mentions = [make_member(id=i) for i in range(config.MENTIONS_LIMIT - 1)]
-        message = make_message(mentions=mentions)
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message(mentions=mentions))
 
-        assert await flood_cog.mention_check(message) is False
+        assert await flood_cog.mention_check(ctx) is False
 
     async def test_at_limit_mutes_and_alerts(self, flood_cog, config):
         member = make_member(name="mencionador")
         mentions = [make_member(id=i) for i in range(config.MENTIONS_LIMIT)]
-        message = make_message(author=member, mentions=mentions)
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message(author=member, mentions=mentions))
 
-        assert await flood_cog.mention_check(message) is True
+        assert await flood_cog.mention_check(ctx) is True
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
 
     async def test_mentions_and_role_mentions_add_up(self, flood_cog, config):
         member = make_member(name="mencionador")
         mentions = [make_member(id=1)]
         role_mentions = [object() for _ in range(config.MENTIONS_LIMIT - 1)]
-        message = make_message(author=member, mentions=mentions, role_mentions=role_mentions)
-        prime_cog(flood_cog, message)
+        ctx = make_context(
+            make_message(author=member, mentions=mentions, role_mentions=role_mentions)
+        )
 
-        assert await flood_cog.mention_check(message) is True
+        assert await flood_cog.mention_check(ctx) is True
 
 
 # ---------------------------------------------------------------------------
@@ -141,10 +138,9 @@ class TestMentionCheck:
 # ---------------------------------------------------------------------------
 class TestAttachmentCheckFastPath:
     async def test_no_images_returns_false(self, flood_cog):
-        message = make_message(attachments=[make_attachment(content_type="text/plain")])
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message(attachments=[make_attachment(content_type="text/plain")]))
 
-        assert await flood_cog.attachment_check(message) is False
+        assert await flood_cog.attachment_check(ctx) is False
 
     async def test_known_hash_mutes_and_deletes_regardless_of_channel_count(
         self, flood_cog, patched_message_delete
@@ -158,9 +154,9 @@ class TestAttachmentCheckFastPath:
             author=member,
             attachments=[make_attachment(data=data)],
         )
-        prime_cog(flood_cog, message)
+        ctx = make_context(message)
 
-        assert await flood_cog.attachment_check(message) is True
+        assert await flood_cog.attachment_check(ctx) is True
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
         patched_message_delete.assert_awaited_once_with(message)
 
@@ -183,14 +179,12 @@ class TestAttachmentCheckBurstPath:
             channel=make_text_channel(id=1),
             attachments=[make_attachment(filename="a1.png"), make_attachment(filename="a2.png")],
         )
-        prime_cog(flood_cog, first)
-        await flood_cog.attachment_check(first)
+        await flood_cog.attachment_check(make_context(first))
 
         b1 = make_attachment(filename="b1.png", data=make_png_bytes((255, 0, 0)))
         b2 = make_attachment(filename="b2.png", data=make_png_bytes((0, 255, 0)))
         second = make_message(author=member, channel=make_text_channel(id=2), attachments=[b1, b2])
-        prime_cog(flood_cog, second)
-        result = await flood_cog.attachment_check(second)
+        result = await flood_cog.attachment_check(make_context(second))
 
         assert result is True  # sanity check that the burst path actually ran
         b1.read.assert_awaited_once()
@@ -202,9 +196,8 @@ class TestAttachmentCheckBurstPath:
             author=member,
             attachments=[make_attachment(filename="a.png"), make_attachment(filename="b.png")],
         )
-        prime_cog(flood_cog, message)
 
-        assert await flood_cog.attachment_check(message) is False
+        assert await flood_cog.attachment_check(make_context(message)) is False
         member.add_roles.assert_not_awaited()
 
     async def test_single_image_across_channels_does_not_trigger(self, flood_cog):
@@ -216,8 +209,7 @@ class TestAttachmentCheckBurstPath:
             message = make_message(
                 author=member, channel=channel, attachments=[make_attachment()]
             )
-            prime_cog(flood_cog, message)
-            assert await flood_cog.attachment_check(message) is False
+            assert await flood_cog.attachment_check(make_context(message)) is False
 
         member.add_roles.assert_not_awaited()
 
@@ -233,16 +225,14 @@ class TestAttachmentCheckBurstPath:
             channel=channel_a,
             attachments=[make_attachment(filename="a1.png"), make_attachment(filename="a2.png")],
         )
-        prime_cog(flood_cog, first)
-        first_result = await flood_cog.attachment_check(first)
+        first_result = await flood_cog.attachment_check(make_context(first))
 
         second = make_message(
             author=member,
             channel=channel_b,
             attachments=[make_attachment(filename="b1.png"), make_attachment(filename="b2.png")],
         )
-        prime_cog(flood_cog, second)
-        second_result = await flood_cog.attachment_check(second)
+        second_result = await flood_cog.attachment_check(make_context(second))
 
         # The first channel's message is never retroactively touched - only
         # the message that crosses the 2-channel threshold gets acted on.
@@ -268,16 +258,14 @@ class TestAttachmentCheckBurstPath:
             channel=make_text_channel(id=1),
             attachments=[make_attachment(data=data_a), make_attachment(data=data_b)],
         )
-        prime_cog(flood_cog, first)
-        await flood_cog.attachment_check(first)
+        await flood_cog.attachment_check(make_context(first))
 
         second = make_message(
             author=member,
             channel=make_text_channel(id=2),
             attachments=[make_attachment(data=data_a), make_attachment(data=data_b)],
         )
-        prime_cog(flood_cog, second)
-        await flood_cog.attachment_check(second)
+        await flood_cog.attachment_check(make_context(second))
 
         import hashlib
 
@@ -296,16 +284,14 @@ class TestAttachmentCheckBurstPath:
             channel=make_text_channel(id=1),
             attachments=[make_attachment(filename="a1.png"), make_attachment(filename="a2.png")],
         )
-        prime_cog(flood_cog, first)
-        await flood_cog.attachment_check(first)
+        await flood_cog.attachment_check(make_context(first))
 
         second = make_message(
             author=member,
             channel=make_text_channel(id=2),
             attachments=[make_attachment(filename="b1.png"), make_attachment(filename="b2.png")],
         )
-        prime_cog(flood_cog, second)
-        result = await flood_cog.attachment_check(second)
+        result = await flood_cog.attachment_check(make_context(second))
 
         assert result is False
         member.add_roles.assert_not_awaited()
@@ -320,8 +306,7 @@ class TestAttachmentCheckBurstPath:
                 channel=channel,
                 attachments=[make_attachment(filename="a.png"), make_attachment(filename="b.png")],
             )
-            prime_cog(flood_cog, message)
-            result = await flood_cog.attachment_check(message)
+            result = await flood_cog.attachment_check(make_context(message))
 
         assert result is False
         member.add_roles.assert_not_awaited()
@@ -382,10 +367,9 @@ class TestAlertModeration:
         so a message containing one could break out of the inline code
         span in the "Mensaje" field.
         """
-        message = make_message(content="mira este `codigo` raro")
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message(content="mira este `codigo` raro"))
 
-        await flood_cog.alert_moderation("Alerta", "scam")
+        await flood_cog.alert_moderation(ctx, "Alerta", "scam")
 
         thread = flood_cog.main_mod_channel.create_thread.return_value
         _, kwargs = thread.send.call_args
@@ -393,10 +377,9 @@ class TestAlertModeration:
         assert mensaje_field.value.count("`") == 2  # only the wrapping backticks
 
     async def test_empty_content_shows_a_placeholder(self, flood_cog):
-        message = make_message(content="")
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message(content=""))
 
-        await flood_cog.alert_moderation("Alerta", "known_image")
+        await flood_cog.alert_moderation(ctx, "Alerta", "known_image")
 
         thread = flood_cog.main_mod_channel.create_thread.return_value
         _, kwargs = thread.send.call_args
@@ -405,10 +388,9 @@ class TestAlertModeration:
 
     async def test_creates_thread_and_sends_embed(self, flood_cog):
         member = make_member(name="alguien")
-        message = make_message(author=member)
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message(author=member))
 
-        await flood_cog.alert_moderation("Alerta de prueba", "scam")
+        await flood_cog.alert_moderation(ctx, "Alerta de prueba", "scam")
 
         flood_cog.main_mod_channel.create_thread.assert_awaited_once()
         _, kwargs = flood_cog.main_mod_channel.create_thread.call_args
@@ -418,17 +400,15 @@ class TestAlertModeration:
         thread.send.assert_awaited_once()
 
     async def test_unknown_reason_raises(self, flood_cog):
-        message = make_message()
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message())
 
         with pytest.raises(KeyError):
-            await flood_cog.alert_moderation("Título", "no-existe")
+            await flood_cog.alert_moderation(ctx, "Título", "no-existe")
 
     async def test_attachments_are_forwarded_sanitized_and_spoilered(self, flood_cog):
-        message = make_message()
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message())
 
-        await flood_cog.alert_moderation("Alerta", "known_image", image_bytes=[make_png_bytes()])
+        await flood_cog.alert_moderation(ctx, "Alerta", "known_image", image_bytes=[make_png_bytes()])
 
         thread = flood_cog.main_mod_channel.create_thread.return_value
         _, kwargs = thread.send.call_args
@@ -436,20 +416,18 @@ class TestAlertModeration:
         assert kwargs["files"][0].spoiler is True
 
     async def test_undecodable_attachment_is_skipped_not_forwarded(self, flood_cog):
-        message = make_message()
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message())
 
-        await flood_cog.alert_moderation("Alerta", "known_image", image_bytes=[b"garbage" * 10])
+        await flood_cog.alert_moderation(ctx, "Alerta", "known_image", image_bytes=[b"garbage" * 10])
 
         thread = flood_cog.main_mod_channel.create_thread.return_value
         _, kwargs = thread.send.call_args
         assert kwargs["files"] == []
 
     async def test_no_attachments_means_no_warning_field(self, flood_cog):
-        message = make_message()
-        prime_cog(flood_cog, message)
+        ctx = make_context(make_message())
 
-        await flood_cog.alert_moderation("Alerta", "scam")
+        await flood_cog.alert_moderation(ctx, "Alerta", "scam")
 
         thread = flood_cog.main_mod_channel.create_thread.return_value
         _, kwargs = thread.send.call_args
@@ -501,8 +479,9 @@ class TestOnMessagePipeline:
 
         await flood_cog.on_message(message)
 
-        # Never even gets far enough to set up per-message state.
-        assert flood_cog._msg_author is None
+        # Never even gets far enough to build a MessageContext or touch state.
+        message.channel.send.assert_not_awaited()
+        assert flood_cog.messages.image_authors == {}
 
     async def test_short_caption_with_attachments_is_still_processed(self, flood_cog):
         member = make_member(name="alguien")
@@ -514,9 +493,10 @@ class TestOnMessagePipeline:
 
         await flood_cog.on_message(message)
 
-        # It went through the pipeline (attachment_check saw it), even though
-        # the caption alone would have been skipped.
-        assert flood_cog._msg_author is member
+        # It went through the pipeline (attachment_check saw it and recorded
+        # this channel for the burst-tracking window), even though the
+        # caption alone would have been skipped.
+        assert member in flood_cog.messages.image_authors
 
     async def test_skips_coordination_role_members(self, flood_cog):
         message = make_message(
@@ -524,11 +504,7 @@ class TestOnMessagePipeline:
             author=make_member(name="mod", roles=[flood_cog.coord_role]),
         )
 
-        result = None
-        try:
-            result = await flood_cog.on_message(message)
-        finally:
-            pass
+        await flood_cog.on_message(message)
 
         message.author.add_roles.assert_not_awaited()
 
