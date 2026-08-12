@@ -2,3 +2,4 @@
 config.toml
 __pycache__
 bot.log
+.pytest_cache
