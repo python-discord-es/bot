@@ -248,7 +248,7 @@ class FloodSpam(commands.Cog):
                         "repetitivos. El equipo de coordinación ha sido notificado."
                     )
                     embed = discord.Embed(
-                        title="\N{NO ENTRY} Alerta de posible SCAM",
+                        title="\N{NO ENTRY} Alerta de posible SPAM",
                         description=_msg,
                         colour=colors.BRAND,
                     )
@@ -325,7 +325,8 @@ class FloodSpam(commands.Cog):
                 await discord.Message.delete(message)
                 msg = (
                     f"El mensaje del usuario {self._msg_author_mention} fue borrado por "
-                    "contener una imagen detectada previamente como spam."
+                    "contener una imagen detectada previamente como spam.\nEl equipo de "
+                    "coordinación ha sido notificado."
                 )
                 embed = discord.Embed(
                     title="\N{NO ENTRY} Alerta de posible SPAM",
@@ -373,10 +374,11 @@ class FloodSpam(commands.Cog):
             f"El mensaje del usuario {self._msg_author_mention} fue borrado por compartir "
             "imágenes en varios canales en poco tiempo, lo cual podría indicar una cuenta "
             "comprometida.\nEvita **hacer click** en enlaces o seguir instrucciones de "
-            "imágenes de **usuarios que no conozcas**."
+            "imágenes de **usuarios que no conozcas**.\nEl equipo de coordinación ha sido "
+            "notificado."
         )
         embed = discord.Embed(
-            title="\N{NO ENTRY} Alerta de posible SCAM",
+            title="\N{NO ENTRY} Alerta de posible SPAM",
             description=msg,
             colour=colors.BRAND,
         )
@@ -460,7 +462,11 @@ class FloodSpam(commands.Cog):
             description=msg,
             colour=colors.BRAND,
         )
-        embed.add_field(name="Mensaje", value=f"`{repr(self._msg_content)[1:-1]}`", inline=False)
+        # Escape backticks so message content can't break out of the inline
+        # code span (repr(...)[1:-1] used to do this by stripping repr's
+        # quote characters - fragile, and didn't actually escape backticks).
+        safe_content = self._msg_content.replace("`", "'") if self._msg_content else "(sin texto)"
+        embed.add_field(name="Mensaje", value=f"`{safe_content}`", inline=False)
         embed.add_field(
             name="En caso de ser spam",
             value=(

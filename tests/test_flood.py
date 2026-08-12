@@ -82,6 +82,12 @@ class TestFloodCheck:
         assert "hola hola hola" in flood_cog.messages.spam
         # Counter resets after muting
         assert flood_cog.messages.normal[member] == {}
+        # Repeated messages are behavioral spam, not a scam-link detection -
+        # the public notice should say so consistently with the other
+        # behavioral checks (mentions, known text/images).
+        message.channel.send.assert_awaited_once()
+        _, kwargs = message.channel.send.call_args
+        assert kwargs["embed"].title.endswith("Alerta de posible SPAM")
 
     async def test_different_authors_counted_separately(self, flood_cog, config):
         alice = make_member(name="alice", id=1)
@@ -157,6 +163,10 @@ class TestAttachmentCheckFastPath:
         assert await flood_cog.attachment_check(message) is True
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
         patched_message_delete.assert_awaited_once_with(message)
+
+        message.channel.send.assert_awaited_once()
+        _, kwargs = message.channel.send.call_args
+        assert "equipo de coordinación ha sido notificado" in kwargs["embed"].description
 
 
 class TestAttachmentCheckBurstPath:
@@ -240,6 +250,14 @@ class TestAttachmentCheckBurstPath:
         assert second_result is True
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
         patched_message_delete.assert_awaited_once_with(second)
+
+        # Consistent wording with the other behavioral (non scam-link)
+        # detections: "posible SPAM", and reassurance that the mod team
+        # was notified (alert_moderation posts to the mod thread).
+        second.channel.send.assert_awaited_once()
+        _, kwargs = second.channel.send.call_args
+        assert kwargs["embed"].title.endswith("Alerta de posible SPAM")
+        assert "equipo de coordinación ha sido notificado" in kwargs["embed"].description
 
     async def test_images_get_cached_for_the_fast_path(self, flood_cog):
         member = make_member(name="comprometido")
@@ -358,6 +376,33 @@ class TestAddSpamHelpers:
 # alert_moderation
 # ---------------------------------------------------------------------------
 class TestAlertModeration:
+    async def test_backticks_in_content_do_not_break_the_code_span(self, flood_cog):
+        """Regression test: the old repr(self._msg_content)[1:-1] trick
+        stripped repr()'s own quote characters but never escaped backticks,
+        so a message containing one could break out of the inline code
+        span in the "Mensaje" field.
+        """
+        message = make_message(content="mira este `codigo` raro")
+        prime_cog(flood_cog, message)
+
+        await flood_cog.alert_moderation("Alerta", "scam")
+
+        thread = flood_cog.main_mod_channel.create_thread.return_value
+        _, kwargs = thread.send.call_args
+        mensaje_field = next(f for f in kwargs["embed"].fields if f.name == "Mensaje")
+        assert mensaje_field.value.count("`") == 2  # only the wrapping backticks
+
+    async def test_empty_content_shows_a_placeholder(self, flood_cog):
+        message = make_message(content="")
+        prime_cog(flood_cog, message)
+
+        await flood_cog.alert_moderation("Alerta", "known_image")
+
+        thread = flood_cog.main_mod_channel.create_thread.return_value
+        _, kwargs = thread.send.call_args
+        mensaje_field = next(f for f in kwargs["embed"].fields if f.name == "Mensaje")
+        assert "(sin texto)" in mensaje_field.value
+
     async def test_creates_thread_and_sends_embed(self, flood_cog):
         member = make_member(name="alguien")
         message = make_message(author=member)
