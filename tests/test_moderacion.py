@@ -2,7 +2,6 @@ import csv
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pandas as pd
 import pytest
 
 from comandos.moderacion import _decode_message, _encode_message
@@ -26,7 +25,7 @@ def add_pending_row(cog, post_id, *, channel="envio-eventos", author_id=42, auth
         "author": author_name,
         "message": encode(content),
     }
-    cog.bot.data_mod = pd.concat([cog.bot.data_mod, pd.DataFrame([new_row])], ignore_index=True)
+    cog.bot.data_mod[str(post_id)] = new_row
     return new_row
 
 
@@ -185,7 +184,7 @@ class TestGetValidatedPost:
 # ---------------------------------------------------------------------------
 class TestLogAction:
     def test_aceptar_writes_expected_line(self, moderacion_cog, isolated_logs):
-        row = pd.DataFrame([add_pending_row(moderacion_cog, post_id=1)])
+        row = add_pending_row(moderacion_cog, post_id=1)
 
         moderacion_cog._log_action("aceptar", row, "1", "moderador#0")
 
@@ -195,7 +194,7 @@ class TestLogAction:
         assert len(fields) == 7  # no "reason" column for aceptar
 
     def test_rechazar_includes_reason(self, moderacion_cog, isolated_logs):
-        row = pd.DataFrame([add_pending_row(moderacion_cog, post_id=2)])
+        row = add_pending_row(moderacion_cog, post_id=2)
 
         moderacion_cog._log_action("rechazar", row, "2", "moderador#0", "le falta info")
 
@@ -207,10 +206,10 @@ class TestLogAction:
     ):
         """Regression test: an empty reason used to skip the "reason" field
         entirely (``if reason: line += ...``), leaving that row one column
-        short of log_rejected_file's fixed 8-column header - which
-        pd.read_csv (run on every bot startup) can choke on.
+        short of log_rejected_file's fixed 8-column header - which the CSV
+        reader (run on every bot startup) can choke on.
         """
-        row = pd.DataFrame([add_pending_row(moderacion_cog, post_id=3)])
+        row = add_pending_row(moderacion_cog, post_id=3)
 
         moderacion_cog._log_action("rechazar", row, "3", "moderador#0", "")
 
@@ -224,7 +223,7 @@ class TestLogAction:
         csv.writer round-trips this correctly.
         """
         tricky_name = 'mod "raro"; con punto y coma'
-        row = pd.DataFrame([add_pending_row(moderacion_cog, post_id=4, author_name=tricky_name)])
+        row = add_pending_row(moderacion_cog, post_id=4, author_name=tricky_name)
 
         moderacion_cog._log_action("aceptar", row, "4", tricky_name)
 
@@ -296,7 +295,7 @@ class TestAceptarMensaje:
 
         await moderacion_cog._aceptar_mensaje(ctx)
 
-        assert moderacion_cog.bot.data_mod.empty
+        assert moderacion_cog.bot.data_mod == {}
         moderacion_channels["main"].send.assert_awaited_once()
         (msg,), _ = moderacion_channels["main"].send.call_args
         assert "contenido aprobado" in msg
@@ -332,7 +331,7 @@ class TestRechazarMensaje:
 
         await moderacion_cog._rechazar_mensaje(ctx)
 
-        assert moderacion_cog.bot.data_mod.empty
+        assert moderacion_cog.bot.data_mod == {}
         moderacion_channels["sub"].send.assert_awaited_once()
         _, kwargs = moderacion_channels["sub"].send.call_args
         assert "le falta info aqui" in kwargs["embed"].fields[0].value

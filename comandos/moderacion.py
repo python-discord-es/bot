@@ -7,7 +7,6 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
 
-import pandas as pd
 import discord
 from discord.ext import commands
 
@@ -43,13 +42,12 @@ def _decode_message(stored: str) -> str:
 @dataclass
 class ValidatedPost:
     post_id: str
-    mod_row: pd.DataFrame
+    mod_row: dict
     ch_main: discord.TextChannel
     ch_mod: discord.TextChannel
     ch_sub: discord.TextChannel
     message_dec: str
     author: discord.User
-    condition: pd.Series
 
 
 class RejectModal(discord.ui.Modal, title="Rechazar Mensaje"):
@@ -154,20 +152,18 @@ class Moderacion(commands.Cog):
         if post_id is None:
             return None
 
-        if post_id not in set(self.bot.data_mod["message_id"]):
+        mod_row = self.bot.data_mod.get(post_id)
+        if mod_row is None:
             await channel_mod.send(f"El ID {post_id} no fue encontrado")
             return None
 
-        condition = self.bot.data_mod["message_id"] == post_id
-        mod_row = self.bot.data_mod[condition]
-
         channel_id = config.CHANNELS[
-            mod_row["channel"].values[0].replace("envio-", "")
+            mod_row["channel"].replace("envio-", "")
         ]["submission"]
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
 
-        message_dec = _decode_message(mod_row["message"].values[0])
-        author = self.bot.get_user(int(mod_row["author_id"].values[0]))
+        message_dec = _decode_message(mod_row["message"])
+        author = self.bot.get_user(int(mod_row["author_id"]))
 
         return ValidatedPost(
             post_id=post_id,
@@ -177,7 +173,6 @@ class Moderacion(commands.Cog):
             ch_sub=ch_sub,
             message_dec=message_dec,
             author=author,
-            condition=condition,
         )
 
     def _log_action(self, action: str, row, post_id, moderator, reason: str = ""):
@@ -187,9 +182,8 @@ class Moderacion(commands.Cog):
 
         Uses csv.writer (not hand-built quoting) so a channel/author name or
         message containing a literal '"' or newline doesn't silently corrupt
-        the row - these files are re-parsed with pd.read_csv on every bot
-        startup, so a malformed row there can break loading the pending
-        queue.
+        the row - these files are re-parsed on every bot startup, so a
+        malformed row there can break loading the pending queue.
         """
         filename = (
             config.log_accepted_file if action == "aceptar" else config.log_rejected_file
@@ -198,10 +192,10 @@ class Moderacion(commands.Cog):
         fields = [
             date_str,
             post_id,
-            row["channel"].values[0],
-            row["author_id"].values[0],
-            row["author"].values[0],
-            row["message"].values[0],
+            row["channel"],
+            row["author_id"],
+            row["author"],
+            row["message"],
             moderator,
         ]
         # log_rejected_file's header always has a "reason" column - include
@@ -215,15 +209,16 @@ class Moderacion(commands.Cog):
 
     def log_on_message(self, channel_sub, author):
         date_str = f"{datetime.now()}"
+        message_id = f"{self._msg_id}"
         new_data = {
             "date": date_str,
-            "message_id": f"{self._msg_id}",
+            "message_id": message_id,
             "channel": f"{channel_sub}",
             "author_id": f"{author.id}",
             "author": f"{author}",
             "message": f"{self._msg_enc}",
         }
-        self.bot.data_mod = pd.concat([self.bot.data_mod, pd.DataFrame([new_data])])
+        self.bot.data_mod[message_id] = new_data
 
         with open(str(config.log_mod_file), "a", newline="") as f:
             csv.writer(f, delimiter=";").writerow([
@@ -279,7 +274,7 @@ class Moderacion(commands.Cog):
 
         moderator = self._resolve_author(ctx)
         self._log_action("aceptar", vp.mod_row, vp.post_id, moderator)
-        self.bot.data_mod = self.bot.data_mod[~vp.condition]
+        del self.bot.data_mod[vp.post_id]
 
         # Send to the destination channel first so the confirmation below can
         # link to the message that was actually posted there, instead of
@@ -311,7 +306,7 @@ class Moderacion(commands.Cog):
 
         moderator = self._resolve_author(ctx)
         self._log_action("rechazar", vp.mod_row, vp.post_id, moderator, reason or "")
-        self.bot.data_mod = self.bot.data_mod[~vp.condition]
+        del self.bot.data_mod[vp.post_id]
 
         embed = discord.Embed(
             title="Mensaje rechazado",
@@ -342,7 +337,7 @@ class Moderacion(commands.Cog):
             title="Mensajes pendientes de moderación",
             colour=colors.BRAND,
         )
-        for idx, mod_row in data.iterrows():
+        for mod_row in data.values():
             author = self.bot.get_user(int(mod_row["author_id"]))
             if not author:
                 logger.warning("El author '%s' ya no existe en el server.", mod_row["author_id"])
@@ -376,20 +371,19 @@ class Moderacion(commands.Cog):
         if post_id is None:
             return
 
-        if post_id not in self.bot.data_mod["message_id"].to_list():
+        mod_row = self.bot.data_mod.get(post_id)
+        if mod_row is None:
             await channel_mod.send(f"ID no encontrado: {post_id}")
             return
 
-        condition = self.bot.data_mod["message_id"] == post_id
-        mod_row = self.bot.data_mod[condition]
-        author = self.bot.get_user(int(mod_row["author_id"].values[0]))
-        m_message = _decode_message(mod_row["message"].values[0])
+        author = self.bot.get_user(int(mod_row["author_id"]))
+        m_message = _decode_message(mod_row["message"])
 
         embed = discord.Embed(
             title="Mensaje pendiente de moderación",
             description=(
-                f"Post de {author.mention} el {mod_row['date'].values[0]}\n"
-                f"**ID:** {mod_row['message_id'].values[0]}\n"
+                f"Post de {author.mention} el {mod_row['date']}\n"
+                f"**ID:** {mod_row['message_id']}\n"
                 f"**Mensaje:**\n```\n{m_message}\n```\n"
             ),
             colour=colors.BRAND,

@@ -1,5 +1,5 @@
 from tests.factories import make_message
-from utils import get_message_to_moderate, strip_message
+from utils import get_message_to_moderate, read_csv_dicts, strip_message
 
 
 class TestStripMessage:
@@ -23,6 +23,34 @@ class TestStripMessage:
 
     def test_empty_string(self):
         assert strip_message("") == ""
+
+
+class TestReadCsvDicts:
+    def test_reads_rows_as_dicts(self, tmp_path):
+        path = tmp_path / "data.csv"
+        path.write_text("date;message_id;author\n2026-01-01;1;alice\n2026-01-02;2;bob\n")
+
+        rows = read_csv_dicts(path)
+
+        assert rows == [
+            {"date": "2026-01-01", "message_id": "1", "author": "alice"},
+            {"date": "2026-01-02", "message_id": "2", "author": "bob"},
+        ]
+
+    def test_handles_embedded_quotes_delimiters_and_newlines(self, tmp_path):
+        path = tmp_path / "data.csv"
+        path.write_text('date;author;message\n2026-01-01;"mod ""raro""; con coma";"linea uno\nlinea dos"\n')
+
+        rows = read_csv_dicts(path)
+
+        assert rows[0]["author"] == 'mod "raro"; con coma'
+        assert rows[0]["message"] == "linea uno\nlinea dos"
+
+    def test_only_header_returns_empty_list(self, tmp_path):
+        path = tmp_path / "data.csv"
+        path.write_text("date;message_id;author\n")
+
+        assert read_csv_dicts(path) == []
 
 
 class TestGetMessageToModerate:

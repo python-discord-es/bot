@@ -1,3 +1,4 @@
+import csv
 import re
 import discord
 from datetime import datetime, timezone
@@ -10,6 +11,13 @@ config = Config()
 
 aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
 rechazar_emoji = "\N{CROSS MARK}"
+
+
+def read_csv_dicts(path, delimiter=";"):
+    """Read a semicolon-delimited CSV file (as written by csv.writer
+    elsewhere in this project) into a list of {column: value} dicts."""
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f, delimiter=delimiter))
 
 
 def get_message_to_moderate(message):
