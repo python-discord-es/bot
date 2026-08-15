@@ -1,3 +1,4 @@
+import csv
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -27,6 +28,15 @@ def add_pending_row(cog, post_id, *, channel="envio-eventos", author_id=42, auth
     }
     cog.bot.data_mod = pd.concat([cog.bot.data_mod, pd.DataFrame([new_row])], ignore_index=True)
     return new_row
+
+
+def read_last_csv_row(path, delimiter=";"):
+    """isolated_logs seeds each log file with a blank line instead of the
+    real header, so skip empty rows and return the last one actually
+    written."""
+    with path.open(newline="") as f:
+        rows = [row for row in csv.reader(f, delimiter=delimiter) if row]
+    return rows[-1]
 
 
 class TestMessageEncoding:
@@ -179,17 +189,47 @@ class TestLogAction:
 
         moderacion_cog._log_action("aceptar", row, "1", "moderador#0")
 
-        content = isolated_logs.log_accepted_file.read_text()
-        assert '"1"' in content
-        assert '"moderador#0"' in content
+        fields = read_last_csv_row(isolated_logs.log_accepted_file)
+        assert fields[1] == "1"  # post_id
+        assert fields[6] == "moderador#0"  # moderator
+        assert len(fields) == 7  # no "reason" column for aceptar
 
     def test_rechazar_includes_reason(self, moderacion_cog, isolated_logs):
         row = pd.DataFrame([add_pending_row(moderacion_cog, post_id=2)])
 
         moderacion_cog._log_action("rechazar", row, "2", "moderador#0", "le falta info")
 
-        content = isolated_logs.log_rejected_file.read_text()
-        assert '"le falta info"' in content
+        fields = read_last_csv_row(isolated_logs.log_rejected_file)
+        assert fields[-1] == "le falta info"
+
+    def test_rechazar_without_reason_still_writes_the_reason_column(
+        self, moderacion_cog, isolated_logs
+    ):
+        """Regression test: an empty reason used to skip the "reason" field
+        entirely (``if reason: line += ...``), leaving that row one column
+        short of log_rejected_file's fixed 8-column header - which
+        pd.read_csv (run on every bot startup) can choke on.
+        """
+        row = pd.DataFrame([add_pending_row(moderacion_cog, post_id=3)])
+
+        moderacion_cog._log_action("rechazar", row, "3", "moderador#0", "")
+
+        fields = read_last_csv_row(isolated_logs.log_rejected_file)
+        assert len(fields) == 8
+        assert fields[-1] == ""
+
+    def test_embedded_quotes_and_delimiters_round_trip(self, moderacion_cog, isolated_logs):
+        """Regression test: hand-built '"{value}"' quoting didn't escape
+        embedded quotes/delimiters, silently corrupting the row. A proper
+        csv.writer round-trips this correctly.
+        """
+        tricky_name = 'mod "raro"; con punto y coma'
+        row = pd.DataFrame([add_pending_row(moderacion_cog, post_id=4, author_name=tricky_name)])
+
+        moderacion_cog._log_action("aceptar", row, "4", tricky_name)
+
+        fields = read_last_csv_row(isolated_logs.log_accepted_file)
+        assert fields[6] == tricky_name
 
 
 class TestLogOnMessage:
@@ -202,7 +242,8 @@ class TestLogOnMessage:
         moderacion_cog.log_on_message("envio-eventos", author)
 
         assert len(moderacion_cog.bot.data_mod) == before + 1
-        assert "777" in isolated_logs.log_mod_file.read_text()
+        fields = read_last_csv_row(isolated_logs.log_mod_file)
+        assert fields[1] == "777"
 
 
 # ---------------------------------------------------------------------------

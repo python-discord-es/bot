@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import base64
+import csv
 import logging
 from datetime import datetime
 from dataclasses import dataclass
@@ -183,26 +184,34 @@ class Moderacion(commands.Cog):
         """
         Unified log writer for accept/reject actions.
         action: "aceptar" or "rechazar"
+
+        Uses csv.writer (not hand-built quoting) so a channel/author name or
+        message containing a literal '"' or newline doesn't silently corrupt
+        the row - these files are re-parsed with pd.read_csv on every bot
+        startup, so a malformed row there can break loading the pending
+        queue.
         """
         filename = (
             config.log_accepted_file if action == "aceptar" else config.log_rejected_file
         )
         date_str = f"{datetime.now()}"
-        line = (
-            f'"{date_str}";'
-            f'"{post_id}";'
-            f'"{row["channel"].values[0]}";'
-            f'"{row["author_id"].values[0]}";'
-            f'"{row["author"].values[0]}";'
-            f'"{row["message"].values[0]}";'
-            f'"{moderator}"'
-        )
-        if reason:
-            line += f';"{reason}"'
-        line += "\n"
+        fields = [
+            date_str,
+            post_id,
+            row["channel"].values[0],
+            row["author_id"].values[0],
+            row["author"].values[0],
+            row["message"].values[0],
+            moderator,
+        ]
+        # log_rejected_file's header always has a "reason" column - include
+        # it (even if empty) for every rechazar row, not just when reason is
+        # truthy, so the column count always matches the header.
+        if action != "aceptar":
+            fields.append(reason)
 
-        with open(str(filename), "a") as f:
-            f.write(line)
+        with open(str(filename), "a", newline="") as f:
+            csv.writer(f, delimiter=";").writerow(fields)
 
     def log_on_message(self, channel_sub, author):
         date_str = f"{datetime.now()}"
@@ -216,16 +225,10 @@ class Moderacion(commands.Cog):
         }
         self.bot.data_mod = pd.concat([self.bot.data_mod, pd.DataFrame([new_data])])
 
-        line = (
-            f'"{date_str}";'
-            f'"{self._msg_id}";'
-            f'"{channel_sub}";'
-            f'"{author.id}";'
-            f'"{author}";'
-            f'"{self._msg_enc}"\n'
-        )
-        with open(str(config.log_mod_file), "a") as f:
-            f.write(line)
+        with open(str(config.log_mod_file), "a", newline="") as f:
+            csv.writer(f, delimiter=";").writerow([
+                date_str, self._msg_id, channel_sub, author.id, author, self._msg_enc,
+            ])
 
     @commands.Cog.listener()
     async def on_ready(self):
