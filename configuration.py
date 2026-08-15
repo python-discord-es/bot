@@ -48,6 +48,9 @@ class Config(metaclass=Singleton):
             # message in 2+ different channels is treated as a spam burst.
             self.IMAGE_ATTACHMENT_LIMIT = 2
             self.IMAGE_BURST_WINDOW = 60 * 5
+            # Data-retention policy (see comandos/retencion.py): personal-data
+            # logs older than this are deleted daily.
+            self.RETENTION_DAYS = 30
         except KeyError:
             logger.error(
                 "Error while reading the configuration file. "
@@ -72,6 +75,12 @@ class Config(metaclass=Singleton):
         self.log_accepted_file = Path(LOG_MOD_ACCEPTED_FILE)
         self.log_rejected_file = Path(LOG_MOD_REJECTED_FILE)
 
+        # Audit trail for right-to-erasure requests (comandos/retencion.py).
+        # Only ever holds a user id, who requested it, and a row count - no
+        # personal content - so it's safe to keep indefinitely as evidence
+        # a request was honored.
+        self.log_gdpr_file = Path("logs/gdpr_erasure_log.csv")
+
         # Checking files
         self.check_create_file(
             self.log_file, "date;command;message_id;channel;author_id;author;message\n"
@@ -92,6 +101,10 @@ class Config(metaclass=Singleton):
         self.check_create_file(
             self.log_main_file,
             "date;command;message_id;channel;author_id;author;message\n",
+        )
+        self.check_create_file(
+            self.log_gdpr_file,
+            "date;user_id;requested_by;requested_by_id;total_removed\n",
         )
 
     def get_spam_messages(self):

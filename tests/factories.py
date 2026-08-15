@@ -9,6 +9,7 @@ instead build just-enough fakes:
   ``isinstance()`` checks against - Mock's ``spec=`` makes
   ``isinstance(mock, SpecClass)`` return True, which a plain fake can't do.
 """
+import csv
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -17,6 +18,15 @@ import discord
 from PIL import Image
 
 from utils import strip_message
+
+
+def read_last_csv_row(path, delimiter=";"):
+    """isolated_logs seeds each log file with a blank line instead of the
+    real header, so skip empty rows and return the last one actually
+    written."""
+    with path.open(newline="") as f:
+        rows = [row for row in csv.reader(f, delimiter=delimiter) if row]
+    return rows[-1]
 
 
 def make_role(name="Coordinacion", id=1000):
@@ -155,6 +165,7 @@ def make_interaction(user=None, channel=None):
     interaction.response = MagicMock()
     interaction.response.send_message = AsyncMock()
     interaction.response.send_modal = AsyncMock()
+    interaction.response.edit_message = AsyncMock()
     return interaction
 
 

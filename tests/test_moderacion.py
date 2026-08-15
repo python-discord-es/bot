@@ -1,4 +1,3 @@
-import csv
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -11,6 +10,7 @@ from tests.factories import (
     make_ctx,
     make_interaction,
     make_member,
+    read_last_csv_row,
 )
 
 
@@ -27,15 +27,6 @@ def add_pending_row(cog, post_id, *, channel="envio-eventos", author_id=42, auth
     }
     cog.bot.data_mod[str(post_id)] = new_row
     return new_row
-
-
-def read_last_csv_row(path, delimiter=";"):
-    """isolated_logs seeds each log file with a blank line instead of the
-    real header, so skip empty rows and return the last one actually
-    written."""
-    with path.open(newline="") as f:
-        rows = [row for row in csv.reader(f, delimiter=delimiter) if row]
-    return rows[-1]
 
 
 class TestMessageEncoding:

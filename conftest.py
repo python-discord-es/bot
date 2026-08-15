@@ -97,6 +97,7 @@ def isolated_logs(config, tmp_path, monkeypatch):
         ("log_rejected_file", "mod_log_rejected.csv"),
         ("log_main_file", "main_log.csv"),
         ("log_file", "bot_log.csv"),
+        ("log_gdpr_file", "gdpr_erasure_log.csv"),
     ]:
         path = logs_dir / filename
         path.write_text("\n")
