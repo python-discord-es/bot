@@ -1,7 +1,10 @@
+import logging
 import sys
 import toml
 
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class Singleton(type):
@@ -16,13 +19,13 @@ class Singleton(type):
 class Config(metaclass=Singleton):
     def __init__(self):
         # Configuration file
-        print("Config __init__")
+        logger.debug("Config __init__")
         config = None
         with open("config.toml") as f:
             config = toml.loads(f.read())
 
         if not config:
-            print("Error: Failed to load the config")
+            logger.error("Failed to load the config")
             sys.exit(-1)
 
         try:
@@ -46,8 +49,10 @@ class Config(metaclass=Singleton):
             self.IMAGE_ATTACHMENT_LIMIT = 2
             self.IMAGE_BURST_WINDOW = 60 * 5
         except KeyError:
-            print("Error while reading the configuration file. "
-                  "Make sure it contains all the required field")
+            logger.error(
+                "Error while reading the configuration file. "
+                "Make sure it contains all the required field"
+            )
             sys.exit(-1)
 
         self.setup_log_files()
@@ -94,9 +99,9 @@ class Config(metaclass=Singleton):
         d = set()
         with open(self.log_spam_file) as f:
             for line in f.readlines():
-                print(">>>", line.strip())
+                logger.debug("Loaded known spam message: %r", line.strip())
                 d.add(line.strip())
-        print("LOG: get_spam_messages", d)
+        logger.debug("get_spam_messages: %s", d)
         return d
 
     def get_spam_image_hashes(self):
@@ -107,7 +112,7 @@ class Config(metaclass=Singleton):
                 line = line.strip()
                 if line:
                     d.add(line)
-        print("LOG: get_spam_image_hashes", d)
+        logger.debug("get_spam_image_hashes: %s", d)
         return d
 
     def check_create_file(self, fname: Path, msg: str) -> None:

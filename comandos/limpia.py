@@ -1,10 +1,14 @@
+import logging
+
 import discord
 from discord.ext import commands
 from discord import app_commands
 
+import colors
 from configuration import Config
 
 config = Config()
+logger = logging.getLogger(__name__)
 
 
 class Limpia(commands.Cog):
@@ -27,7 +31,6 @@ class Limpia(commands.Cog):
         if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
             return
 
-        print(dir(ctx.message.reference))
         if hasattr(ctx.message.reference, "message_id"):
             reply_id = ctx.message.reference.message_id
             msg = []
@@ -42,13 +45,13 @@ class Limpia(commands.Cog):
             try:
                 await ctx.message.delete()
             except discord.NotFound:
-                print("Slash command, no need to remove command message")
+                logger.debug("Slash command, no need to remove command message")
 
             # await ctx.channel.typing()
             embed = discord.Embed(
                 title=f"Borrados '{limit}' mensajes\n\n",
                 description=f"Comando ejecuta por {ctx.author.mention}",
-                colour=0x178D38,
+                colour=colors.SUCCESS,
             )
             await ctx.send(embed=embed, ephemeral=True)
             await channel.purge(limit=1)

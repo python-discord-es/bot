@@ -152,9 +152,6 @@ def make_interaction(user=None, channel=None):
     interaction = MagicMock(spec=discord.Interaction)
     interaction.user = user if user is not None else make_member()
     interaction.channel = channel if channel is not None else make_text_channel()
-    # `_is_valid_channel` compares `channel_mod.id == ctx.message.channel.id`
-    # even for interactions, so this needs to line up with `.channel` too.
-    interaction.message = SimpleNamespace(channel=interaction.channel)
     interaction.response = MagicMock()
     interaction.response.send_message = AsyncMock()
     interaction.response.send_modal = AsyncMock()
@@ -162,10 +159,17 @@ def make_interaction(user=None, channel=None):
 
 
 def encode_for_mod_row(text: str) -> str:
-    """Matches ``Moderacion.on_message``'s encoding of a message's content
-    into the ``data_mod``/log-file ``message`` column: a base64-encoded
-    ``bytes`` object rendered through an f-string (so later ``eval()``'d
-    back into a real ``bytes`` object by the accept/reject/list commands)."""
+    """Matches ``Moderacion``'s current encoding of a message's content into
+    the ``data_mod``/log-file ``message`` column: a plain base64 string."""
+    import base64
+
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def encode_for_mod_row_legacy(text: str) -> str:
+    """Matches the *old* (pre-fix) encoding: the repr of a base64 ``bytes``
+    object, e.g. ``"b'aG9sYQ=='"``. Used to test that rows logged before
+    the eval()-removal fix still decode correctly."""
     import base64
 
     return f"{base64.b64encode(text.encode('utf-8'))}"
@@ -194,11 +198,11 @@ def bind_commands(cog):
     return cog
 
 
-def prime_cog(cog, message):
-    """Mirror the attribute setup ``FloodSpam.on_message`` does before
-    delegating to its individual ``*_check`` methods, so those methods can
-    be unit-tested directly without going through the full listener."""
-    cog._msg_channel = message.channel
-    cog._msg_content = strip_message(message.content)
-    cog._msg_author = message.author
-    cog._msg_author_mention = message.author.mention
+def make_context(message):
+    """Build the ``MessageContext`` ``FloodSpam.on_message`` would build
+    before delegating to its individual ``*_check`` methods, so those
+    methods can be unit-tested directly without going through the full
+    listener."""
+    from comandos.flood import MessageContext
+
+    return MessageContext(message=message, content=strip_message(message.content))

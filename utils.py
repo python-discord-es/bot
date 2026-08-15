@@ -2,6 +2,7 @@ import re
 import discord
 from datetime import datetime, timezone
 
+import colors
 from configuration import Config
 
 config = Config()
@@ -9,10 +10,6 @@ config = Config()
 
 aceptar_emoji = "\N{WHITE HEAVY CHECK MARK}"
 rechazar_emoji = "\N{CROSS MARK}"
-
-def get_moderation_channel(bot, channel_id):
-    channel_mod = bot.get_channel(channel_id)
-    return channel_mod
 
 
 def get_message_to_moderate(message):
@@ -28,7 +25,7 @@ def get_message_to_moderate(message):
     embed = discord.Embed(
         title="Moderación de mensaje",
         description=msg,
-        colour=0x2B597B,
+        colour=colors.BRAND,
     )
 
     return embed

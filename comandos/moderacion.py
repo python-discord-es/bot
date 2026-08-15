@@ -1,5 +1,8 @@
+import ast
 import asyncio
 import base64
+import csv
+import logging
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
@@ -8,12 +11,33 @@ import pandas as pd
 import discord
 from discord.ext import commands
 
+import colors
 from configuration import Config
-from utils import get_moderation_channel, get_message_to_moderate, aceptar_emoji, rechazar_emoji
+from utils import get_message_to_moderate, aceptar_emoji, rechazar_emoji
 
 config = Config()
+logger = logging.getLogger(__name__)
 
-EMBED_COLOR = 0x2B597B
+
+def _encode_message(content: str) -> str:
+    """Base64-encode a message's content for storage in data_mod/the log files."""
+    return base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+
+def _decode_message(stored: str) -> str:
+    """Reverse ``_encode_message``.
+
+    Also tolerates the legacy on-disk format: older code stored the
+    *repr* of the base64 `bytes` object (e.g. ``"b'aG9sYQ=='"``, via
+    ``f"{base64.b64encode(...)}"``) and reversed it with ``eval()``. Rows
+    written before this change still look like that, so a plain
+    ``b64decode`` fails validation and we fall back to safely parsing that
+    literal with ``ast.literal_eval`` instead - no ``eval()`` involved.
+    """
+    try:
+        return base64.b64decode(stored, validate=True).decode("utf-8")
+    except ValueError:
+        return base64.b64decode(ast.literal_eval(stored)).decode("utf-8")
 
 
 @dataclass
@@ -88,10 +112,6 @@ class Moderacion(commands.Cog):
     def _is_bot(self, ctx) -> bool:
         return self._resolve_author(ctx).id == config.BOT_ID
 
-    def _is_valid_channel(self, ctx) -> bool:
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
-        return channel_mod.id == ctx.message.channel.id
-
     def get_channels_main_mod_sub(self, channel_id):
         channel_main = self.bot.get_channel(self.channels[channel_id]["main"])
         channel_mod = self.bot.get_channel(self.channels[channel_id]["mod"])
@@ -102,7 +122,7 @@ class Moderacion(commands.Cog):
         self, ctx, message_id: Optional[int], command_name: str
     ) -> Optional[str]:
         """Parse and validate the post_id from interaction or command message."""
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
 
         if isinstance(ctx, discord.Interaction) and message_id is not None:
             return str(message_id)
@@ -125,10 +145,10 @@ class Moderacion(commands.Cog):
         - Resolves channels and decodes the message
         Returns a ValidatedPost or None if any step fails.
         """
-        if self._is_bot(ctx) or not self._is_valid_channel(ctx):
+        if self._is_bot(ctx):
             return None
 
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
 
         post_id = await self._parse_post_id(ctx, message_id, command_name)
         if post_id is None:
@@ -146,7 +166,7 @@ class Moderacion(commands.Cog):
         ]["submission"]
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
 
-        message_dec = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
+        message_dec = _decode_message(mod_row["message"].values[0])
         author = self.bot.get_user(int(mod_row["author_id"].values[0]))
 
         return ValidatedPost(
@@ -164,26 +184,34 @@ class Moderacion(commands.Cog):
         """
         Unified log writer for accept/reject actions.
         action: "aceptar" or "rechazar"
+
+        Uses csv.writer (not hand-built quoting) so a channel/author name or
+        message containing a literal '"' or newline doesn't silently corrupt
+        the row - these files are re-parsed with pd.read_csv on every bot
+        startup, so a malformed row there can break loading the pending
+        queue.
         """
         filename = (
             config.log_accepted_file if action == "aceptar" else config.log_rejected_file
         )
         date_str = f"{datetime.now()}"
-        line = (
-            f'"{date_str}";'
-            f'"{post_id}";'
-            f'"{row["channel"].values[0]}";'
-            f'"{row["author_id"].values[0]}";'
-            f'"{row["author"].values[0]}";'
-            f'"{row["message"].values[0]}";'
-            f'"{moderator}"'
-        )
-        if reason:
-            line += f';"{reason}"'
-        line += "\n"
+        fields = [
+            date_str,
+            post_id,
+            row["channel"].values[0],
+            row["author_id"].values[0],
+            row["author"].values[0],
+            row["message"].values[0],
+            moderator,
+        ]
+        # log_rejected_file's header always has a "reason" column - include
+        # it (even if empty) for every rechazar row, not just when reason is
+        # truthy, so the column count always matches the header.
+        if action != "aceptar":
+            fields.append(reason)
 
-        with open(str(filename), "a") as f:
-            f.write(line)
+        with open(str(filename), "a", newline="") as f:
+            csv.writer(f, delimiter=";").writerow(fields)
 
     def log_on_message(self, channel_sub, author):
         date_str = f"{datetime.now()}"
@@ -197,16 +225,10 @@ class Moderacion(commands.Cog):
         }
         self.bot.data_mod = pd.concat([self.bot.data_mod, pd.DataFrame([new_data])])
 
-        line = (
-            f'"{date_str}";'
-            f'"{self._msg_id}";'
-            f'"{channel_sub}";'
-            f'"{author.id}";'
-            f'"{author}";'
-            f'"{self._msg_enc}"\n'
-        )
-        with open(str(config.log_mod_file), "a") as f:
-            f.write(line)
+        with open(str(config.log_mod_file), "a", newline="") as f:
+            csv.writer(f, delimiter=";").writerow([
+                date_str, self._msg_id, channel_sub, author.id, author, self._msg_enc,
+            ])
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -229,7 +251,7 @@ class Moderacion(commands.Cog):
             return
 
         self._msg_id = message.id
-        self._msg_enc = base64.b64encode(message.content.encode("utf-8"))
+        self._msg_enc = _encode_message(message.content)
 
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(ch_id)
         self.log_on_message(ch_sub, message.author)
@@ -237,7 +259,7 @@ class Moderacion(commands.Cog):
         embed = discord.Embed(
             title="Mensaje Enviado",
             description=f"Gracias {message.author.mention}, tu mensaje espera moderación.",
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         reply_msg = await ch_sub.send(embed=embed)
 
@@ -259,12 +281,16 @@ class Moderacion(commands.Cog):
         self._log_action("aceptar", vp.mod_row, vp.post_id, moderator)
         self.bot.data_mod = self.bot.data_mod[~vp.condition]
 
-        jump_url = f"https://discord.com/channels/{self.bot.guilds[0].id}/{vp.ch_main.id}/{self._msg_id}"
+        # Send to the destination channel first so the confirmation below can
+        # link to the message that was actually posted there, instead of
+        # guessing at a URL (the old code built the link from self._msg_id -
+        # the *original submission's* id in a different channel entirely -
+        # before the message below even existed).
+        sent_message = await vp.ch_main.send(f"> [Enviado por {vp.author.mention}]\n{vp.message_dec}")
         await vp.ch_mod.send(
             f"{aceptar_emoji} Mensaje `{vp.post_id}` aceptado, "
-            f"enviado al canal {vp.ch_main.mention}\nVer en {jump_url}"
+            f"enviado al canal {vp.ch_main.mention}\nVer en {sent_message.jump_url}"
         )
-        await vp.ch_main.send(f"> [Enviado por {vp.author.mention}]\n{vp.message_dec}")
 
     @commands.command(name="aceptar", help="Comando para aceptar mensajes en moderación")
     @commands.has_role(config.MOD_ROLE)
@@ -290,7 +316,7 @@ class Moderacion(commands.Cog):
         embed = discord.Embed(
             title="Mensaje rechazado",
             description=f"{vp.author.mention} tu mensaje necesita atención.",
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         embed.add_field(
             name="Razón rechazado",
@@ -314,14 +340,14 @@ class Moderacion(commands.Cog):
         messages = False
         embed = discord.Embed(
             title="Mensajes pendientes de moderación",
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         for idx, mod_row in data.iterrows():
             author = self.bot.get_user(int(mod_row["author_id"]))
             if not author:
-                print(f"El author '{mod_row['author_id']}' ya no existe en el server.")
+                logger.warning("El author '%s' ya no existe en el server.", mod_row["author_id"])
                 continue
-            m_message = base64.b64decode(eval(mod_row["message"])).decode("utf-8")
+            m_message = _decode_message(mod_row["message"])
             embed.add_field(
                 name=f"ID: `{mod_row['message_id']}`",
                 value=f"{m_message[:30]}...\nFecha: `{mod_row['date']}`\nAutor: {author.mention}",
@@ -336,10 +362,10 @@ class Moderacion(commands.Cog):
     @commands.command(name="mod", help="Comando para listar los mensajes pendientes")
     @commands.has_role(config.MOD_ROLE)
     async def mostrar_mensajes(self, ctx):
-        if self._is_bot(ctx) or not self._is_valid_channel(ctx):
+        if self._is_bot(ctx):
             return
 
-        channel_mod = get_moderation_channel(self.bot, ctx.channel.id)
+        channel_mod = self.bot.get_channel(ctx.channel.id)
         _post = ctx.message.content.replace("%mod", "").strip().split()
 
         if not _post:
@@ -357,7 +383,7 @@ class Moderacion(commands.Cog):
         condition = self.bot.data_mod["message_id"] == post_id
         mod_row = self.bot.data_mod[condition]
         author = self.bot.get_user(int(mod_row["author_id"].values[0]))
-        m_message = base64.b64decode(eval(mod_row["message"].values[0])).decode("utf-8")
+        m_message = _decode_message(mod_row["message"].values[0])
 
         embed = discord.Embed(
             title="Mensaje pendiente de moderación",
@@ -366,6 +392,6 @@ class Moderacion(commands.Cog):
                 f"**ID:** {mod_row['message_id'].values[0]}\n"
                 f"**Mensaje:**\n```\n{m_message}\n```\n"
             ),
-            colour=EMBED_COLOR,
+            colour=colors.BRAND,
         )
         await channel_mod.send(embed=embed)

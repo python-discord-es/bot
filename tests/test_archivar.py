@@ -33,12 +33,12 @@ class TestArchivarCanal:
         # Newlines inside content are escaped, not left as real line breaks.
         assert "hola\\ncon salto de linea" in lines[1]
 
-    def test_stops_and_returns_none_for_unsupported_channel_type(self, tmp_path):
+    def test_stops_and_returns_false_for_unsupported_channel_type(self, tmp_path):
         cog = Archivar(make_bot())
         messages = [make_message(id=1, channel=make_dm_channel())]
         target = tmp_path / "archivo.csv"
 
-        assert cog.archivar_canal(str(target), messages) is None
+        assert cog.archivar_canal(str(target), messages) == (False, None)
 
     def test_write_failure_returns_false_none(self, tmp_path):
         cog = Archivar(make_bot())
@@ -47,17 +47,6 @@ class TestArchivarCanal:
         bad_target = tmp_path
 
         assert cog.archivar_canal(str(bad_target), messages) == (False, None)
-
-    def test_failure_tuple_is_still_truthy(self, tmp_path):
-        """Documents a real footgun in archivar(): ``status = archivar_canal(...)``
-        followed by ``if status:`` treats a write failure as success, because
-        ``(False, None)`` is a non-empty tuple and therefore truthy in Python.
-        """
-        cog = Archivar(make_bot())
-        status = cog.archivar_canal(str(tmp_path), [make_message(id=1)])
-
-        assert status == (False, None)
-        assert bool(status) is True  # the actual footgun
 
 
 class TestArchivarCommand:
@@ -96,6 +85,32 @@ class TestArchivarCommand:
         mod_channel.send.assert_awaited_once()
         (msg,), _ = mod_channel.send.call_args
         assert "Error" in msg
+
+    async def test_write_exception_reports_error_instead_of_crashing(self, tmp_path, monkeypatch):
+        """Regression test: archivar_canal() returning (False, None) on a
+        write failure used to be treated as success by ``if status:``
+        (a non-empty tuple is always truthy), which would then try to
+        attach a file that was never written - crashing instead of just
+        reporting the error.
+        """
+        monkeypatch.chdir(tmp_path)
+        mod_channel = make_text_channel(id=1, name="mod")
+        cog = bind_commands(Archivar(make_bot()))
+        cog.mod_channel = mod_channel
+
+        # A channel name containing "/" makes the auto-generated filename
+        # point at a non-existent subdirectory, so open(filename, "w") fails.
+        channel = make_text_channel(
+            id=2, name="no-existe/canal", history_messages=[make_message(id=1)]
+        )
+        ctx = make_ctx(channel=mod_channel)
+
+        await cog.archivar(ctx, channel=channel)
+
+        mod_channel.send.assert_awaited_once()
+        (msg,), kwargs = mod_channel.send.call_args
+        assert "Error" in msg
+        assert "file" not in kwargs
 
 
 class TestArchivarCategoria:

@@ -1,5 +1,5 @@
 from tests.factories import make_message
-from utils import get_message_to_moderate, get_moderation_channel, strip_message
+from utils import get_message_to_moderate, strip_message
 
 
 class TestStripMessage:
@@ -23,18 +23,6 @@ class TestStripMessage:
 
     def test_empty_string(self):
         assert strip_message("") == ""
-
-
-class TestGetModerationChannel:
-    def test_returns_bot_get_channel_result(self):
-        sentinel = object()
-
-        class FakeBot:
-            def get_channel(self, channel_id):
-                assert channel_id == 42
-                return sentinel
-
-        assert get_moderation_channel(FakeBot(), 42) is sentinel
 
 
 class TestGetMessageToModerate:

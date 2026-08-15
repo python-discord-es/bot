@@ -1,12 +1,15 @@
+import logging
 from datetime import datetime
 from typing import List, Optional
 
 import discord
 from discord.ext import commands
 
+import colors
 from configuration import Config
 
 config = Config()
+logger = logging.getLogger(__name__)
 
 
 class Archivar(commands.Cog):
@@ -28,15 +31,15 @@ class Archivar(commands.Cog):
         filename = f"{timestamp}_canal_{channel.name}.csv"
         messages = [m async for m in channel.history(limit=None)]
 
-        status = self.archivar_canal(filename, messages)
+        status, archived_filename = self.archivar_canal(filename, messages)
 
         if status:
             e = discord.Embed(
                 title="\N{PAGE FACING UP} Canal Archivado",
                 description=f"El canal {channel.mention} tiene {len(messages)} mensajes",
-                colour=0xFF0000,
+                colour=colors.ARCHIVE,
             )
-            await self.mod_channel.send(embed=e, file=discord.File(filename))
+            await self.mod_channel.send(embed=e, file=discord.File(archived_filename))
         else:
             await self.mod_channel.send(f"Error: Canal '{channel.name}' no fue archivado.")
 
@@ -53,6 +56,14 @@ class Archivar(commands.Cog):
                 await self.archivar(ctx, channel=channel)
 
     def archivar_canal(self, filename: str, messages: List[discord.Message]):
+        """Write ``messages`` to ``filename`` as CSV.
+
+        Always returns a ``(success, filename)`` tuple - never just a bare
+        falsy value - so callers can safely do
+        ``status, archived_filename = self.archivar_canal(...)`` and check
+        ``status`` directly, instead of risking a non-empty-but-failed
+        tuple being treated as truthy.
+        """
         try:
             with open(filename, "w") as f:
                 f.write(
@@ -63,7 +74,7 @@ class Archivar(commands.Cog):
                 for msg in messages:
 
                     if not isinstance(msg.channel, (discord.TextChannel, discord.Thread, discord.VoiceChannel)):
-                        return
+                        return False, None
 
                     m_id = msg.id
                     m_content = msg.content.strip().replace("\n", "\\n")
@@ -78,9 +89,9 @@ class Archivar(commands.Cog):
                         f"{m_id};{m_content};{m_channel_id};{m_channel_name};{m_channel_category};"
                         f"{m_author_id};{m_author_name}#{m_author_discriminator};{m_author_bot}\n"
                     )
-            print(f"File written: {filename}")
-        except Exception as e:
-            print(f"{type(e).__name__}: {e}")
+            logger.info("File written: %s", filename)
+        except Exception:
+            logger.exception("Failed to archive channel into %s", filename)
             return False, None
 
         return True, filename

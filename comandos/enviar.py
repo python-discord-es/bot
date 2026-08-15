@@ -1,10 +1,10 @@
 from discord.ext import commands
 from discord import TextChannel, Embed, app_commands
 
+import colors
 from configuration import Config
 
 config = Config()
-COLOR_MSG = 0xfdc130
 
 
 class Enviar(commands.Cog):
@@ -22,7 +22,7 @@ class Enviar(commands.Cog):
         reply_embed = Embed(
             title=f"Mensaje enviado a {channel}",
             description=f"{channel.mention}:\n{message}",
-            colour=COLOR_MSG,
+            colour=colors.BROADCAST,
         )
 
         try:
@@ -33,7 +33,7 @@ class Enviar(commands.Cog):
         embed = Embed(
             title="Mensaje de Coordinación",
             description=message,
-            colour=COLOR_MSG,
+            colour=colors.BROADCAST,
         )
 
         # Send the command to the channel passed to the command
