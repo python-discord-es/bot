@@ -1,12 +1,12 @@
 import asyncio
 import csv
-import pandas as pd
 import discord
 import logging
 from discord.ext import commands
 from datetime import datetime
 
 from configuration import Config
+from utils import read_csv_dicts
 
 # Add cogs
 from comandos.ping import Ping
@@ -71,16 +71,20 @@ async def on_command_error(msg, error):
 
 async def main():
     # Reading data
-    data_mod = pd.read_csv(str(config.log_mod_file), sep=";", dtype=str)
-    data_accepted = pd.read_csv(str(config.log_accepted_file), sep=";", dtype=str)
-    data_rejected = pd.read_csv(str(config.log_rejected_file), sep=";", dtype=str)
+    data_mod = read_csv_dicts(config.log_mod_file)
+    data_accepted = read_csv_dicts(config.log_accepted_file)
+    data_rejected = read_csv_dicts(config.log_rejected_file)
 
     # Pending moderation
     # Get 'message_id' from the 'accepted' and 'rejected' files
-    ready_ids = set(data_accepted["message_id"]).union(data_rejected["message_id"])
+    ready_ids = {row["message_id"] for row in data_accepted} | {
+        row["message_id"] for row in data_rejected
+    }
 
-    # keeping the data in the bot instance
-    bot.data_mod = data_mod[~data_mod["message_id"].isin(ready_ids)]  # type: ignore[attr-defined]
+    # keeping the data in the bot instance, keyed by message_id
+    bot.data_mod = {  # type: ignore[attr-defined]
+        row["message_id"]: row for row in data_mod if row["message_id"] not in ready_ids
+    }
 
     for cog_cls in COGS:
         await bot.add_cog(cog_cls(bot))

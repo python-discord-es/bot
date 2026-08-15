@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 
 from comandos.flood import FloodSpam
@@ -51,9 +50,7 @@ async def moderacion_cog(isolated_logs, moderacion_channels):
 
     channels = {c.id: c for c in moderacion_channels.values()}
     bot = make_bot(channels=channels, guild=SimpleNamespace(id=333333333333333333))
-    bot.data_mod = pd.DataFrame(
-        columns=["date", "message_id", "channel", "author_id", "author", "message"]
-    )
+    bot.data_mod = {}  # message_id -> row dict, same shape as read_csv_dicts() rows
     cog = Moderacion(bot)
     await cog.on_ready()
     return cog
