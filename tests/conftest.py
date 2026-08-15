@@ -2,6 +2,7 @@ import pytest
 
 from comandos.flood import FloodSpam
 from comandos.moderacion import Moderacion
+from comandos.retencion import Retencion
 from tests.factories import make_bot, make_role, make_text_channel
 
 
@@ -53,4 +54,15 @@ async def moderacion_cog(isolated_logs, moderacion_channels):
     bot.data_mod = {}  # message_id -> row dict, same shape as read_csv_dicts() rows
     cog = Moderacion(bot)
     await cog.on_ready()
+    return cog
+
+
+@pytest.fixture
+def retencion_cog(isolated_logs, coord_role):
+    """A Retencion cog wired up the way on_ready() would, without needing a
+    real discord.Client/Guild or starting the real @tasks.loop."""
+    bot = make_bot()
+    bot.data_mod = {}
+    cog = Retencion(bot)
+    cog._coord_role = coord_role
     return cog

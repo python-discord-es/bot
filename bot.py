@@ -16,11 +16,12 @@ from comandos.flood import FloodSpam
 from comandos.limpia import Limpia
 from comandos.archivar import Archivar
 from comandos.enviar import Enviar
+from comandos.retencion import Retencion
 
 # Every cog to register on startup. Add a class here (and to the imports
 # above) to wire up a new command/listener group - nothing else needs to
 # change.
-COGS = (Ping, Ayuda, Limpia, Archivar, Moderacion, FloodSpam, Enviar)
+COGS = (Ping, Ayuda, Limpia, Archivar, Moderacion, FloodSpam, Enviar, Retencion)
 
 # Global instance of the server
 guild = None
@@ -28,8 +29,15 @@ guild = None
 # Configuration
 config = Config()
 
-# Use '%' as command prefix
-intents = discord.Intents().all()
+# Use '%' as command prefix.
+# Only request the privileged intent we actually use (Message Content -
+# every spam/moderation check reads message.content). Members and
+# Presences are also privileged but nothing in this codebase uses guild
+# member chunking, join/leave/update events, or presence data, so we don't
+# request them: fewer privileged intents means less to justify/review
+# under Discord's developer policy as the bot grows.
+intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="%", intents=intents)
 
 handler = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
