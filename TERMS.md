@@ -1,17 +1,5 @@
 # Términos de Uso y Política de Datos del Bot
 
-> **⚠️ Aviso importante:** este documento es un **borrador técnico**, escrito
-> para describir con precisión qué hace el bot con los datos que maneja. No
-> es asesoría legal. Antes de publicarlo como política oficial de la
-> comunidad, debe ser revisado por una persona con conocimientos legales en
-> protección de datos (RGPD/GDPR u otra normativa aplicable según dónde
-> resida la comunidad y sus miembros).
->
-> Responsable del tratamiento de datos: **[COMPLETAR: nombre/contacto del
-> equipo u organización responsable del servidor]**
-> Contacto para consultas o solicitudes sobre tus datos: **[COMPLETAR:
-> correo o canal de contacto]**
-
 Este documento describe qué datos recopila y almacena el bot de moderación
 de este servidor de Discord, con qué propósito, durante cuánto tiempo, y
 qué opciones tienes respecto a tus propios datos.
@@ -21,7 +9,7 @@ qué opciones tienes respecto a tus propios datos.
 Este documento cubre únicamente los datos que **el bot** almacena por su
 cuenta (en archivos de registro en el servidor donde corre). No cubre los
 datos que Discord, como plataforma, almacena sobre tu cuenta, tus mensajes
-o tu actividad — eso se rige por la [Política de Privacidad de
+o tu actividad - eso se rige por la [Política de Privacidad de
 Discord](https://discord.com/privacy). El bot no puede eliminar ni
 controlar esos datos.
 
@@ -73,7 +61,7 @@ Puedes solicitar en cualquier momento:
 - **Que se eliminen todos tus datos** ("derecho al olvido").
 
 Para ejercer cualquiera de estos derechos, contacta con
-**[COMPLETAR: contacto]**. Una vez validada la solicitud, un miembro del
+**contacto@hablemospython.dev**. Una vez validada la solicitud, un miembro del
 equipo de Coordinación puede ejecutar la eliminación mediante el comando
 `%olvidar`, que:
 

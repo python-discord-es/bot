@@ -29,8 +29,15 @@ guild = None
 # Configuration
 config = Config()
 
-# Use '%' as command prefix
-intents = discord.Intents().all()
+# Use '%' as command prefix.
+# Only request the privileged intent we actually use (Message Content -
+# every spam/moderation check reads message.content). Members and
+# Presences are also privileged but nothing in this codebase uses guild
+# member chunking, join/leave/update events, or presence data, so we don't
+# request them: fewer privileged intents means less to justify/review
+# under Discord's developer policy as the bot grows.
+intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="%", intents=intents)
 
 handler = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
