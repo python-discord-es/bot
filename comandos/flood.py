@@ -368,21 +368,21 @@ class FloodSpam(commands.Cog):
 
         # Burst path: same author, 2+ images, 2+ different channels, short window
         now = time.time()
-        channels = self.image_authors.get(ctx.author, {})
-        channels = {
-            channel_id: ts
-            for channel_id, ts in channels.items()
-            if now - ts <= config.IMAGE_BURST_WINDOW
+        tracked = self.image_authors.get(ctx.author, {})
+        tracked = {
+            channel_id: entry
+            for channel_id, entry in tracked.items()
+            if now - entry["ts"] <= config.IMAGE_BURST_WINDOW
         }
-        channels[ctx.channel.id] = now
-        self.image_authors[ctx.author] = channels
+        tracked[ctx.channel.id] = {"message": ctx.message, "ts": now}
+        self.image_authors[ctx.author] = tracked
 
-        if len(channels) < 2:
+        if len(tracked) < 2:
             return False
 
         await self.alert_moderation(
             ctx,
-            "Alerta de SPAM (Imágenes en varios canales)",
+            f"Alerta de SPAM (Imágenes en {len(tracked)} canales)",
             "image_burst",
             image_bytes=image_bytes,
         )
@@ -397,7 +397,11 @@ class FloodSpam(commands.Cog):
         # Reset author's channel tracking now that we've acted on it
         self.image_authors[ctx.author] = {}
 
-        await discord.Message.delete(ctx.message)
+        # Clean up every channel the burst touched, not just the message
+        # that happened to cross the 2-channel threshold. A compromised
+        # account spraying the same images across channels can beat the
+        # detection to several of them before the mute above lands - leaving
+        # those copies up defeats the point of catching this at all.
         msg = (
             f"El mensaje del usuario {ctx.author_mention} fue borrado por compartir "
             "imágenes en varios canales en poco tiempo, lo cual podría indicar una cuenta "
@@ -410,8 +414,22 @@ class FloodSpam(commands.Cog):
             description=msg,
             colour=colors.BRAND,
         )
-        await ctx.channel.send(embed=embed, delete_after=300)
+        for entry in tracked.values():
+            await self._delete_and_warn(entry["message"], embed)
+
         return True
+
+    @staticmethod
+    async def _delete_and_warn(message: discord.Message, embed: discord.Embed):
+        """Delete ``message`` (tolerating it already being gone) and post
+        ``embed`` in its channel either way - bystanders in that channel
+        should still see the compromised-account warning even if the
+        message itself was already removed by someone else."""
+        try:
+            await discord.Message.delete(message)
+        except discord.NotFound:
+            logger.debug("_delete_and_warn: message %s already gone", message.id)
+        await message.channel.send(embed=embed, delete_after=300)
 
     async def mention_check(self, ctx: MessageContext):
         logger.debug("mention_check: %s", ctx.message.id)

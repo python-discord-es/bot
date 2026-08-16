@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
@@ -234,20 +234,81 @@ class TestAttachmentCheckBurstPath:
         )
         second_result = await flood_cog.attachment_check(make_context(second))
 
-        # The first channel's message is never retroactively touched - only
-        # the message that crosses the 2-channel threshold gets acted on.
+        # The first channel's message doesn't trigger anything on its own -
+        # detection only fires once a second channel is seen within the
+        # burst window.
         assert first_result is False
         assert second_result is True
         member.add_roles.assert_awaited_once_with(flood_cog.muted_role)
-        patched_message_delete.assert_awaited_once_with(second)
 
-        # Consistent wording with the other behavioral (non scam-link)
-        # detections: "posible SPAM", and reassurance that the mod team
-        # was notified (alert_moderation posts to the mod thread).
-        second.channel.send.assert_awaited_once()
-        _, kwargs = second.channel.send.call_args
-        assert kwargs["embed"].title.endswith("Alerta de posible SPAM")
-        assert "equipo de coordinación ha sido notificado" in kwargs["embed"].description
+        # But once it fires, *both* channels get cleaned up - not just the
+        # message that happened to cross the threshold. A compromised
+        # account spraying images across channels can beat detection to
+        # several of them before the mute lands; leaving those copies up
+        # would defeat the point.
+        patched_message_delete.assert_any_await(first)
+        patched_message_delete.assert_any_await(second)
+        assert patched_message_delete.await_count == 2
+
+        for channel in (channel_a, channel_b):
+            channel.send.assert_awaited_once()
+            _, kwargs = channel.send.call_args
+            assert kwargs["embed"].title.endswith("Alerta de posible SPAM")
+            assert "equipo de coordinación ha sido notificado" in kwargs["embed"].description
+
+    async def test_alert_moderation_title_reports_the_channel_count(self, flood_cog):
+        # The burst fires (and resets tracking) the moment a 2nd distinct
+        # channel is seen, so the count in the mod-thread title is always 2
+        # at the point it actually triggers.
+        member = make_member(name="comprometido")
+
+        for channel_id in (1, 2):
+            message = make_message(
+                author=member,
+                channel=make_text_channel(id=channel_id),
+                attachments=[make_attachment(filename="a.png"), make_attachment(filename="b.png")],
+            )
+            result = await flood_cog.attachment_check(make_context(message))
+
+        assert result is True
+        flood_cog.main_mod_channel.create_thread.assert_awaited_once()
+        _, kwargs = flood_cog.main_mod_channel.create_thread.call_args
+        assert "2 canales" in kwargs["name"]
+
+    async def test_still_warns_a_channel_whose_message_was_already_deleted(
+        self, flood_cog, patched_message_delete
+    ):
+        """If one of the affected messages is already gone (e.g. a
+        moderator removed it manually first), the cleanup shouldn't crash -
+        bystanders in that channel should still see the warning.
+        """
+        member = make_member(name="comprometido")
+        channel_a = make_text_channel(id=1)
+        channel_b = make_text_channel(id=2)
+
+        first = make_message(
+            author=member,
+            channel=channel_a,
+            attachments=[make_attachment(filename="a1.png"), make_attachment(filename="a2.png")],
+        )
+        await flood_cog.attachment_check(make_context(first))
+
+        async def flaky_delete(message):
+            if message is first:
+                raise discord.NotFound(MagicMock(), "ya no existe")
+
+        patched_message_delete.side_effect = flaky_delete
+
+        second = make_message(
+            author=member,
+            channel=channel_b,
+            attachments=[make_attachment(filename="b1.png"), make_attachment(filename="b2.png")],
+        )
+        result = await flood_cog.attachment_check(make_context(second))
+
+        assert result is True
+        channel_a.send.assert_awaited_once()
+        channel_b.send.assert_awaited_once()
 
     async def test_images_get_cached_for_the_fast_path(self, flood_cog):
         member = make_member(name="comprometido")
