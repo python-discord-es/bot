@@ -19,6 +19,16 @@ class Ayuda(commands.Cog):
 
         await ctx.channel.send(embed=self.get_mod_help())
 
+    @commands.command(
+        name="terminos",
+        help="Muestra el enlace a los Términos de Uso y Política de Datos del bot",
+    )
+    async def terminos(self, ctx):
+        await ctx.channel.send(
+            "\N{PAGE FACING UP} Términos de Uso y Política de Datos de LlamaBot: "
+            f"{config.TERMS_URL}"
+        )
+
     def get_mod_help(self):
         embed = discord.Embed(
             title="Comandos Disponibles",
@@ -50,6 +60,11 @@ class Ayuda(commands.Cog):
         embed.add_field(
             name="`%limpia`",
             value="Limpia N mensajes del canal de moderación",
+            inline=False,
+        )
+        embed.add_field(
+            name="`%terminos`",
+            value="Muestra el enlace a los Términos de Uso y Política de Datos del bot",
             inline=False,
         )
         return embed

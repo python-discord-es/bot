@@ -7,6 +7,10 @@ Two mechanisms:
   every stored row belonging to a specific user on request, with an
   explicit confirmation step first.
 
+The read-only counterpart to erasure - the right of access - lives in
+``comandos/exportar.py`` (``%exportar``), built on top of the
+``rows_for_author()`` helper defined here.
+
 ``log_spam_file``/``log_image_spam_file`` (the known-spam text/image-hash
 caches) are intentionally excluded from both: they store only message
 content or image hashes, never an author, so they aren't personal data to
@@ -99,6 +103,16 @@ def count_rows_for_author(path, author_id) -> int:
     with open(path, newline="") as f:
         reader = csv.DictReader(f, delimiter=";")
         return sum(1 for row in reader if row.get("author_id") == author_id)
+
+
+def rows_for_author(path, author_id) -> list:
+    """Read-only: every row belonging to ``author_id``, without modifying
+    anything. Used for right-of-access/export requests (comandos/exportar.py),
+    the read counterpart to remove_rows_for_author()'s right-to-erasure."""
+    author_id = str(author_id)
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f, delimiter=";")
+        return [row for row in reader if row.get("author_id") == author_id]
 
 
 class ConfirmErasureView(discord.ui.View):

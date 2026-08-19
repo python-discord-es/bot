@@ -58,6 +58,15 @@ class Config(metaclass=Singleton):
             )
             sys.exit(-1)
 
+        # Public URL to TERMS.md (the bot's terms of use / data policy),
+        # surfaced via the %terminos command and (separately, outside this
+        # repo) the Discord Developer Portal's privacy-policy field.
+        # Optional/`.get()`-based on purpose: older configs without a
+        # [links] section shouldn't fail to start over this.
+        self.TERMS_URL = config.get("links", {}).get(
+            "terms_url", "https://raw.githubusercontent.com/python-discord-es/bot/main/TERMS.md"
+        )
+
         self.setup_log_files()
 
     def setup_log_files(self):
@@ -80,6 +89,11 @@ class Config(metaclass=Singleton):
         # personal content - so it's safe to keep indefinitely as evidence
         # a request was honored.
         self.log_gdpr_file = Path("logs/gdpr_erasure_log.csv")
+
+        # Audit trail for right-of-access/export requests (comandos/exportar.py).
+        # Same shape/rationale as log_gdpr_file above: id, requester and a
+        # count only, never the exported content itself.
+        self.log_gdpr_access_file = Path("logs/gdpr_access_log.csv")
 
         # Checking files
         self.check_create_file(
@@ -105,6 +119,10 @@ class Config(metaclass=Singleton):
         self.check_create_file(
             self.log_gdpr_file,
             "date;user_id;requested_by;requested_by_id;total_removed\n",
+        )
+        self.check_create_file(
+            self.log_gdpr_access_file,
+            "date;user_id;requested_by;requested_by_id;total_exported\n",
         )
 
     def get_spam_messages(self):

@@ -17,11 +17,12 @@ from comandos.limpia import Limpia
 from comandos.archivar import Archivar
 from comandos.enviar import Enviar
 from comandos.retencion import Retencion
+from comandos.exportar import Exportar
 
 # Every cog to register on startup. Add a class here (and to the imports
 # above) to wire up a new command/listener group - nothing else needs to
 # change.
-COGS = (Ping, Ayuda, Limpia, Archivar, Moderacion, FloodSpam, Enviar, Retencion)
+COGS = (Ping, Ayuda, Limpia, Archivar, Moderacion, FloodSpam, Enviar, Retencion, Exportar)
 
 # Global instance of the server
 guild = None

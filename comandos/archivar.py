@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 import discord
@@ -40,6 +41,13 @@ class Archivar(commands.Cog):
                 colour=colors.ARCHIVE,
             )
             await self.mod_channel.send(embed=e, file=discord.File(archived_filename))
+            # The message just sent to the mod channel is the durable copy
+            # (per TERMS.md, channel archives are preserved there as an
+            # institutional record, not by this bot) - delete the local
+            # temp file now instead of leaving a personal-data CSV sitting
+            # unmanaged on the host's filesystem outside the retention
+            # policy in comandos/retencion.py.
+            Path(archived_filename).unlink(missing_ok=True)
         else:
             await self.mod_channel.send(f"Error: Canal '{channel.name}' no fue archivado.")
 
