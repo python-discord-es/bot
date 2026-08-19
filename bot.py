@@ -10,7 +10,7 @@ from utils import read_csv_dicts
 
 # Add cogs
 from comandos.ping import Ping
-from comandos.moderacion import Moderacion
+from comandos.moderacion import Moderacion, ApproveButton, RejectButton
 from comandos.ayuda import Ayuda
 from comandos.flood import FloodSpam
 from comandos.limpia import Limpia
@@ -40,8 +40,12 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="%", intents=intents)
 
-handler = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
-discord.utils.setup_logging(level=logging.INFO, handler=handler)
+file_handler = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
+discord.utils.setup_logging(level=logging.INFO, handler=file_handler)
+# Also mirror everything to the console - previously bot.log was the *only*
+# handler, so running the bot attached to a terminal/screen session showed
+# nothing there; every message only ever went to the file.
+discord.utils.setup_logging(level=logging.INFO, handler=logging.StreamHandler())
 logger = logging.getLogger(__name__)
 
 
@@ -93,6 +97,12 @@ async def main():
     bot.data_mod = {  # type: ignore[attr-defined]
         row["message_id"]: row for row in data_mod if row["message_id"] not in ready_ids
     }
+
+    # Registers the Aprobar/Rechazar buttons as persistent - required for
+    # clicks on messages sent before this process started to keep working
+    # (see comandos/moderacion.py's ApproveButton docstring for why
+    # timeout=None alone doesn't already do this).
+    bot.add_dynamic_items(ApproveButton, RejectButton)
 
     for cog_cls in COGS:
         await bot.add_cog(cog_cls(bot))
