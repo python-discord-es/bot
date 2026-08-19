@@ -50,6 +50,21 @@ class ValidatedPost:
     author: discord.User
 
 
+def _pending_author(cog, message_id: int):
+    """Resolve a still-pending post's author live, at click time, from
+    ``bot.data_mod`` - used by the persistent Aprobar/Rechazar buttons below
+    so they never depend on the Python state of the moment the message was
+    first sent, which is gone after a bot restart."""
+    mod_row = cog.bot.data_mod.get(str(message_id))
+    if mod_row is None:
+        return None
+    return cog.bot.get_user(int(mod_row["author_id"]))
+
+
+def _mention_or_unknown(author) -> str:
+    return f"de {author.mention}" if author else "(el autor ya no está disponible)"
+
+
 class RejectModal(discord.ui.Modal, title="Rechazar Mensaje"):
     reason = discord.ui.TextInput(
         label="Razón del rechazo",
@@ -58,43 +73,108 @@ class RejectModal(discord.ui.Modal, title="Rechazar Mensaje"):
         required=True
     )
 
-    def __init__(self, author: discord.Member, cog, message_id: int):
+    def __init__(self, cog, message_id: int, author: Optional[discord.abc.User] = None):
         super().__init__()
-        self.author = author
         self.cog = cog
         self.message_id = message_id
+        self.author = author
 
     async def on_submit(self, interaction: discord.Interaction):
         mod = interaction.user
         await interaction.response.send_message(
-            f"{mod.mention} rechazó el mensaje de {self.author.mention}.\n"
+            f"{mod.mention} rechazó el mensaje {_mention_or_unknown(self.author)}.\n"
             f"Razón: {self.reason.value}",
             ephemeral=True
         )
         await self.cog._rechazar_mensaje(interaction, self.message_id, self.reason.value)
 
 
-class ApproveRejectView(discord.ui.View):
-    def __init__(self, author: discord.Member, cog, message_id: int):
-        super().__init__(timeout=None)
-        self.author = author
-        self.cog = cog
+class ApproveButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"moderacion:aprobar:(?P<message_id>[0-9]+)",
+):
+    """A button whose target message is encoded in its ``custom_id``
+    instead of Python closure/constructor state.
+
+    ``discord.ui.View(timeout=None)`` alone (the previous approach) only
+    keeps a button from visually expiring - it does NOT make it survive a
+    bot restart, since the view instance holding ``author``/``message_id``
+    in memory is gone once the process restarts, and Discord has nothing to
+    route the click to. This DynamicItem (paired with
+    ``bot.add_dynamic_items()`` in bot.py) is reconstructed from the
+    ``custom_id`` alone via ``from_custom_id``, so a click always works
+    regardless of how long ago the message was sent or whether the bot
+    restarted since.
+    """
+
+    def __init__(self, message_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="Aprobar",
+                style=discord.ButtonStyle.success,
+                custom_id=f"moderacion:aprobar:{message_id}",
+            )
+        )
         self.message_id = message_id
 
-    @discord.ui.button(label="Aprobar", style=discord.ButtonStyle.success)
-    async def approve_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        mod = interaction.user
-        await interaction.response.send_message(
-            f"{mod.mention} aprobó el mensaje de {self.author.mention}.",
-            ephemeral=True
-        )
-        await self.cog._aceptar_mensaje(interaction, self.message_id)
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["message_id"]))
 
-    @discord.ui.button(label="Rechazar", style=discord.ButtonStyle.danger)
-    async def reject_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(
-            RejectModal(author=self.author, cog=self.cog, message_id=self.message_id)
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("Moderacion")
+        if cog is None:
+            return
+        mod = interaction.user
+        author = _pending_author(cog, self.message_id)
+        await interaction.response.send_message(
+            f"{mod.mention} aprobó el mensaje {_mention_or_unknown(author)}.",
+            ephemeral=True,
         )
+        await cog._aceptar_mensaje(interaction, self.message_id)
+
+
+class RejectButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"moderacion:rechazar:(?P<message_id>[0-9]+)",
+):
+    """Persistent counterpart to ``ApproveButton`` above - see its
+    docstring."""
+
+    def __init__(self, message_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="Rechazar",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"moderacion:rechazar:{message_id}",
+            )
+        )
+        self.message_id = message_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["message_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("Moderacion")
+        if cog is None:
+            return
+        author = _pending_author(cog, self.message_id)
+        await interaction.response.send_modal(
+            RejectModal(cog=cog, message_id=self.message_id, author=author)
+        )
+
+
+class ApproveRejectView(discord.ui.View):
+    """Sent once, right after a submission - built from the persistent
+    DynamicItem buttons above, so it keeps responding to clicks even across
+    a bot restart (as long as ``bot.add_dynamic_items()`` ran on startup -
+    see bot.py)."""
+
+    def __init__(self, message_id: int):
+        super().__init__(timeout=None)
+        self.add_item(ApproveButton(message_id))
+        self.add_item(RejectButton(message_id))
 
 
 class Moderacion(commands.Cog):
@@ -164,6 +244,18 @@ class Moderacion(commands.Cog):
 
         message_dec = _decode_message(mod_row["message"])
         author = self.bot.get_user(int(mod_row["author_id"]))
+        if author is None:
+            # Same condition get_mod_pending() silently skips - here we can't
+            # silently skip it (the moderator is actively trying to act on
+            # it), so make it an explicit, visible failure instead of
+            # continuing with author=None and crashing later on
+            # author.mention with no trace of why.
+            logger.warning("El author '%s' ya no existe en el server.", mod_row["author_id"])
+            await channel_mod.send(
+                f"El autor del mensaje `{post_id}` (ID `{mod_row['author_id']}`) ya no está "
+                "en el servidor; no se puede procesar."
+            )
+            return None
 
         return ValidatedPost(
             post_id=post_id,
@@ -259,7 +351,7 @@ class Moderacion(commands.Cog):
         reply_msg = await ch_sub.send(embed=embed)
 
         embed = get_message_to_moderate(message)
-        view = ApproveRejectView(message.author, cog=self, message_id=message.id)
+        view = ApproveRejectView(message_id=message.id)
         await ch_mod.send(embed=embed, view=view)
 
         await asyncio.sleep(3)
@@ -272,16 +364,35 @@ class Moderacion(commands.Cog):
         if vp is None:
             return
 
+        # Post to the destination channel *first*, and only log the accept /
+        # drop it from bot.data_mod once that actually succeeds. Doing this
+        # the other way around (as before) meant a failure here - message
+        # over Discord's 2000-char limit, missing permissions in the
+        # destination channel, a transient network hiccup - silently lost
+        # the post: it had already been logged "aceptado" and removed from
+        # the pending queue, so nothing showed it never actually went out.
+        try:
+            sent_message = await vp.ch_main.send(
+                f"> [Enviado por {vp.author.mention}]\n{vp.message_dec}"
+            )
+        except Exception:
+            logger.exception(
+                "Fallo al enviar el mensaje aceptado %s a %s", vp.post_id, vp.ch_main
+            )
+            await vp.ch_mod.send(
+                f"\N{WARNING SIGN} No se pudo enviar el mensaje `{vp.post_id}` a "
+                f"{vp.ch_main.mention}. Sigue pendiente - revisa bot.log e intenta de nuevo."
+            )
+            return
+
         moderator = self._resolve_author(ctx)
         self._log_action("aceptar", vp.mod_row, vp.post_id, moderator)
         del self.bot.data_mod[vp.post_id]
 
-        # Send to the destination channel first so the confirmation below can
-        # link to the message that was actually posted there, instead of
+        # Link to the message that was actually posted there, instead of
         # guessing at a URL (the old code built the link from self._msg_id -
         # the *original submission's* id in a different channel entirely -
         # before the message below even existed).
-        sent_message = await vp.ch_main.send(f"> [Enviado por {vp.author.mention}]\n{vp.message_dec}")
         await vp.ch_mod.send(
             f"{aceptar_emoji} Mensaje `{vp.post_id}` aceptado, "
             f"enviado al canal {vp.ch_main.mention}\nVer en {sent_message.jump_url}"
@@ -304,10 +415,6 @@ class Moderacion(commands.Cog):
             _post = ctx.message.content.replace("%rechazar", "").strip().split()
             reason = " ".join(_post[1:])  # everything after the ID
 
-        moderator = self._resolve_author(ctx)
-        self._log_action("rechazar", vp.mod_row, vp.post_id, moderator, reason or "")
-        del self.bot.data_mod[vp.post_id]
-
         embed = discord.Embed(
             title="Mensaje rechazado",
             description=f"{vp.author.mention} tu mensaje necesita atención.",
@@ -320,11 +427,29 @@ class Moderacion(commands.Cog):
         )
         embed.add_field(name="Mensaje original", value=vp.message_dec, inline=False)
 
+        # Same reasoning as _aceptar_mensaje: notify the submitter *first*,
+        # only log the reject / drop it from bot.data_mod once that actually
+        # goes through, so a failure here doesn't quietly lose the item.
+        try:
+            await vp.ch_sub.send(embed=embed)
+        except Exception:
+            logger.exception(
+                "Fallo al notificar el rechazo del mensaje %s a %s", vp.post_id, vp.ch_sub
+            )
+            await vp.ch_mod.send(
+                f"\N{WARNING SIGN} No se pudo notificar el rechazo del mensaje `{vp.post_id}` "
+                f"a {vp.ch_sub.mention}. Sigue pendiente - revisa bot.log e intenta de nuevo."
+            )
+            return
+
+        moderator = self._resolve_author(ctx)
+        self._log_action("rechazar", vp.mod_row, vp.post_id, moderator, reason or "")
+        del self.bot.data_mod[vp.post_id]
+
         await vp.ch_mod.send(
             f"{rechazar_emoji} Mensaje `{vp.post_id}` rechazado, "
             f"enviada respuesta a {vp.ch_mod.mention}"
         )
-        await vp.ch_sub.send(embed=embed)
 
     @commands.command(name="rechazar", help="Comando para rechazar mensajes en moderación")
     @commands.has_role(config.MOD_ROLE)

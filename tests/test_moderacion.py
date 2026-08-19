@@ -3,7 +3,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from comandos.moderacion import _decode_message, _encode_message
+from comandos.moderacion import (
+    ApproveButton,
+    RejectButton,
+    RejectModal,
+    _decode_message,
+    _encode_message,
+    _pending_author,
+)
 from tests.factories import (
     encode_for_mod_row,
     encode_for_mod_row_legacy,
@@ -169,6 +176,24 @@ class TestGetValidatedPost:
 
         assert await moderacion_cog._get_validated_post(ctx, None, "%aceptar") is None
 
+    async def test_unknown_author_reports_error_and_returns_none(
+        self, moderacion_cog, moderacion_channels
+    ):
+        """Regression test: this used to fall through with author=None and
+        crash later on author.mention with no clear explanation - now it's
+        an explicit, visible failure instead, mirroring get_mod_pending()'s
+        handling of the same condition."""
+        add_pending_row(moderacion_cog, post_id=1, author_id=404)
+        # bot.get_user(404) resolves to None - author has left the server.
+        ctx = make_ctx(channel=moderacion_channels["mod"], content="%aceptar 1")
+
+        vp = await moderacion_cog._get_validated_post(ctx, None, "%aceptar")
+
+        assert vp is None
+        moderacion_channels["mod"].send.assert_awaited_once()
+        (msg,), _ = moderacion_channels["mod"].send.call_args
+        assert "404" in msg
+
 
 # ---------------------------------------------------------------------------
 # _log_action / log_on_message
@@ -306,6 +331,30 @@ class TestAceptarMensaje:
 
         moderacion_channels["main"].send.assert_not_awaited()
 
+    async def test_send_failure_keeps_the_row_pending_and_reports_the_error(
+        self, moderacion_cog, moderacion_channels, isolated_logs
+    ):
+        """Regression test: sending to ch_main used to happen *after*
+        logging the accept and dropping the row from bot.data_mod, so a
+        failure there (message too long, missing permissions, a transient
+        network error, ...) silently lost the post - it was already logged
+        "aceptado" and gone from the pending queue with no visible error
+        anywhere. Now the row must survive a send failure so it can be
+        retried, and the failure must be visible in the mod channel."""
+        add_pending_row(moderacion_cog, post_id=1, author_id=99, content="contenido")
+        moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
+        moderacion_channels["main"].send = AsyncMock(side_effect=RuntimeError("boom"))
+
+        ctx = make_ctx(channel=moderacion_channels["mod"], content="%aceptar 1")
+        await moderacion_cog._aceptar_mensaje(ctx)
+
+        assert "1" in moderacion_cog.bot.data_mod  # still pending, not lost
+        moderacion_channels["mod"].send.assert_awaited_once()
+        (msg,), _ = moderacion_channels["mod"].send.call_args
+        assert "No se pudo enviar" in msg
+        with isolated_logs.log_accepted_file.open() as f:
+            assert f.read().strip() == ""  # nothing falsely logged as accepted
+
 
 class TestRechazarMensaje:
     async def test_removes_pending_row_and_notifies_with_reason(
@@ -338,6 +387,26 @@ class TestRechazarMensaje:
 
         _, kwargs = moderacion_channels["sub"].send.call_args
         assert "motivo modal" in kwargs["embed"].fields[0].value
+
+    async def test_notify_failure_keeps_the_row_pending_and_reports_the_error(
+        self, moderacion_cog, moderacion_channels, isolated_logs
+    ):
+        """Same reordering fix as the aceptar-side regression test above:
+        a failure notifying the submitter must not lose the row or make the
+        mod channel claim success anyway."""
+        add_pending_row(moderacion_cog, post_id=4, author_id=99, content="contenido")
+        moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
+        moderacion_channels["sub"].send = AsyncMock(side_effect=RuntimeError("boom"))
+
+        ctx = make_ctx(channel=moderacion_channels["mod"], content="%rechazar 4 motivo")
+        await moderacion_cog._rechazar_mensaje(ctx)
+
+        assert "4" in moderacion_cog.bot.data_mod  # still pending, not lost
+        moderacion_channels["mod"].send.assert_awaited_once()
+        (msg,), _ = moderacion_channels["mod"].send.call_args
+        assert "No se pudo notificar" in msg
+        with isolated_logs.log_rejected_file.open() as f:
+            assert f.read().strip() == ""  # nothing falsely logged as rejected
 
 
 # ---------------------------------------------------------------------------
@@ -385,3 +454,128 @@ class TestOnMessage:
         assert len(moderacion_cog.bot.data_mod) == before + 1
         moderacion_channels["sub"].send.assert_awaited_once()
         moderacion_channels["mod"].send.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Persistent Aprobar/Rechazar buttons (discord.ui.DynamicItem)
+#
+# These reconstruct themselves from custom_id alone (from_custom_id) and
+# resolve the cog via interaction.client.get_cog(...) instead of a Python
+# closure, which is exactly what makes them keep working after a bot
+# restart - see ApproveButton's docstring in comandos/moderacion.py.
+# ---------------------------------------------------------------------------
+def _match_custom_id(button_cls, message_id):
+    """A real re.Match for button_cls's template, the same kind
+    discord.py hands to from_custom_id() when routing an interaction."""
+    custom_id = f"moderacion:{'aprobar' if button_cls is ApproveButton else 'rechazar'}:{message_id}"
+    return button_cls.__discord_ui_compiled_template__.match(custom_id)
+
+
+class TestPendingAuthor:
+    def test_resolves_the_author_of_a_pending_row(self, moderacion_cog):
+        add_pending_row(moderacion_cog, post_id=1, author_id=99)
+        moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
+
+        assert _pending_author(moderacion_cog, 1).id == 99
+
+    def test_unknown_message_id_returns_none(self, moderacion_cog):
+        assert _pending_author(moderacion_cog, 404) is None
+
+
+class TestApproveButton:
+    async def test_from_custom_id_round_trips_the_message_id(self):
+        match = _match_custom_id(ApproveButton, 12345)
+
+        button = await ApproveButton.from_custom_id(None, None, match)
+
+        assert button.message_id == 12345
+        assert button.item.custom_id == "moderacion:aprobar:12345"
+
+    async def test_callback_resolves_cog_via_interaction_client_and_delegates(
+        self, moderacion_cog, moderacion_channels
+    ):
+        add_pending_row(moderacion_cog, post_id=1, author_id=99)
+        moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
+        moderacion_cog._aceptar_mensaje = AsyncMock()
+        interaction = make_interaction(channel=moderacion_channels["mod"])
+        interaction.client = SimpleNamespace(get_cog=lambda name: moderacion_cog)
+
+        button = ApproveButton(message_id=1)
+        await button.callback(interaction)
+
+        interaction.response.send_message.assert_awaited_once()
+        (msg,), _ = interaction.response.send_message.call_args
+        assert "<@99>" in msg  # make_member()'s fake mention
+        moderacion_cog._aceptar_mensaje.assert_awaited_once_with(interaction, 1)
+
+    async def test_callback_with_no_longer_pending_row_still_delegates(
+        self, moderacion_cog, moderacion_channels
+    ):
+        """The row may already be gone (already handled, or from a message
+        old enough the bot restarted since) - _pending_author then returns
+        None, and the button falls back to a generic message instead of
+        crashing on author.mention."""
+        moderacion_cog._aceptar_mensaje = AsyncMock()
+        interaction = make_interaction(channel=moderacion_channels["mod"])
+        interaction.client = SimpleNamespace(get_cog=lambda name: moderacion_cog)
+
+        button = ApproveButton(message_id=999)
+        await button.callback(interaction)
+
+        (msg,), _ = interaction.response.send_message.call_args
+        assert "ya no está disponible" in msg
+        moderacion_cog._aceptar_mensaje.assert_awaited_once_with(interaction, 999)
+
+    async def test_callback_without_a_registered_cog_does_nothing(self):
+        """If the bot somehow has no Moderacion cog loaded, don't crash -
+        just skip (nothing to delegate to)."""
+        interaction = make_interaction()
+        interaction.client = SimpleNamespace(get_cog=lambda name: None)
+
+        await ApproveButton(message_id=1).callback(interaction)
+
+        interaction.response.send_message.assert_not_awaited()
+
+
+class TestRejectButton:
+    async def test_from_custom_id_round_trips_the_message_id(self):
+        match = _match_custom_id(RejectButton, 777)
+
+        button = await RejectButton.from_custom_id(None, None, match)
+
+        assert button.message_id == 777
+
+    async def test_callback_opens_a_modal_for_the_resolved_author(
+        self, moderacion_cog, moderacion_channels
+    ):
+        add_pending_row(moderacion_cog, post_id=2, author_id=99)
+        moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
+        interaction = make_interaction(channel=moderacion_channels["mod"])
+        interaction.client = SimpleNamespace(get_cog=lambda name: moderacion_cog)
+
+        await RejectButton(message_id=2).callback(interaction)
+
+        interaction.response.send_modal.assert_awaited_once()
+        (modal,), _ = interaction.response.send_modal.call_args
+        assert isinstance(modal, RejectModal)
+        assert modal.message_id == 2
+        assert modal.author.id == 99
+
+
+class TestRejectModal:
+    async def test_on_submit_delegates_with_the_entered_reason(self, moderacion_cog):
+        cog = moderacion_cog
+        cog._rechazar_mensaje = AsyncMock()
+        author = make_member(id=99, name="remitente")
+        modal = RejectModal(cog=cog, message_id=5, author=author)
+        modal.reason._value = "no cumple los requisitos"
+        interaction = make_interaction()
+
+        await modal.on_submit(interaction)
+
+        interaction.response.send_message.assert_awaited_once()
+        (msg,), _ = interaction.response.send_message.call_args
+        assert "<@99>" in msg
+        cog._rechazar_mensaje.assert_awaited_once_with(
+            interaction, 5, "no cumple los requisitos"
+        )
