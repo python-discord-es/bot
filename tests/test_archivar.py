@@ -68,6 +68,10 @@ class TestArchivarCommand:
         mod_channel.send.assert_awaited_once()
         _, kwargs = mod_channel.send.call_args
         assert "2 mensajes" in kwargs["embed"].description
+        # The mod-channel message just sent is the durable copy (see
+        # TERMS.md section 4) - the local temp file shouldn't linger on
+        # disk outside the retention policy in comandos/retencion.py.
+        assert list(tmp_path.glob("*.csv")) == []
 
     async def test_sends_error_embed_when_archiving_fails(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

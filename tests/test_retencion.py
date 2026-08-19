@@ -8,6 +8,7 @@ from comandos.retencion import (
     count_rows_for_author,
     prune_old_rows,
     remove_rows_for_author,
+    rows_for_author,
 )
 from tests.factories import (
     bind_commands,
@@ -108,6 +109,30 @@ class TestRemoveRowsForAuthor:
 
         assert count_rows_for_author(path, 10) == 1
         assert len(read_csv(path)) == 2  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# rows_for_author
+# ---------------------------------------------------------------------------
+class TestRowsForAuthor:
+    def test_returns_only_matching_rows_without_mutating(self, tmp_path):
+        path = tmp_path / "data.csv"
+        write_csv(path, ["date", "author_id", "message_id"], [
+            [RECENT, "10", "1"],
+            [RECENT, "20", "2"],
+            [RECENT, "10", "3"],
+        ])
+
+        rows = rows_for_author(path, 10)
+
+        assert [r["message_id"] for r in rows] == ["1", "3"]
+        assert len(read_csv(path)) == 3  # unchanged
+
+    def test_no_match_returns_empty_list(self, tmp_path):
+        path = tmp_path / "data.csv"
+        write_csv(path, ["date", "author_id", "message_id"], [[RECENT, "10", "1"]])
+
+        assert rows_for_author(path, 999) == []
 
 
 # ---------------------------------------------------------------------------

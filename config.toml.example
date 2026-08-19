@@ -12,6 +12,12 @@ muted_role="..."
 [server]
 guild=
 
+[links]
+# Public URL to the bot's terms of use / data policy (TERMS.md), shown by
+# the %terminos command. Also set this same URL as the bot's privacy
+# policy link in the Discord Developer Portal.
+terms_url="https://raw.githubusercontent.com/python-discord-es/bot/main/TERMS.md"
+
 [channels]
     [channels.eventos]
     main=

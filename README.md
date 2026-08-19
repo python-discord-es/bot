@@ -78,6 +78,14 @@ unas de las siguientes reglas:
 * **Menciones**: Personas que envían mensajes con 3 menciones o más
   a roles o personas.
 
+## Privacidad y datos
+
+El bot almacena algunos datos personales (ver [TERMS.md](TERMS.md)) con
+fines de moderación, con borrado automático a los 30 días y comandos para
+ejercer tus derechos de acceso (`%exportar`, uso del equipo de moderación)
+y de eliminación (`%olvidar`). El comando `%terminos` muestra el enlace a
+la política completa en cualquier momento.
+
 ## Tengo una idea para el bot
 
 Las futuras ideas del bot están definidas como 'Issues' en este repositorio.
