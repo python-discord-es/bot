@@ -71,6 +71,37 @@ class TestResolveAuthor:
         assert moderacion_cog._resolve_author(interaction) is member
 
 
+class TestLookupAuthor:
+    async def test_cached_on_the_bot_resolves_directly(self, moderacion_cog):
+        moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
+
+        author = await moderacion_cog._lookup_author(99)
+
+        assert author.id == 99
+
+    async def test_cache_miss_falls_back_to_fetching_the_guild_member(self, moderacion_cog):
+        """The exact bug this guards against: bot.get_user() only checks
+        the local cache - without the Members intent, that cache can miss
+        someone who's genuinely still in the server but hasn't triggered
+        an event the bot observed since its last reconnect/restart."""
+        moderacion_cog.guild.members_by_id[770973060496359454] = make_member(
+            id=770973060496359454, name="remitente"
+        )
+
+        author = await moderacion_cog._lookup_author(770973060496359454)
+
+        assert author.id == 770973060496359454
+        moderacion_cog.guild.fetch_member.assert_awaited_once_with(770973060496359454)
+
+    async def test_not_cached_and_not_a_guild_member_returns_none(self, moderacion_cog):
+        assert await moderacion_cog._lookup_author(404) is None
+
+    async def test_no_guild_resolved_yet_returns_none_instead_of_crashing(self, moderacion_cog):
+        moderacion_cog.guild = None
+
+        assert await moderacion_cog._lookup_author(404) is None
+
+
 class TestIsBot:
     def test_true_for_configured_bot_id(self, moderacion_cog, config):
         ctx = make_ctx(author=make_member(id=config.BOT_ID))
@@ -184,7 +215,8 @@ class TestGetValidatedPost:
         an explicit, visible failure instead, mirroring get_mod_pending()'s
         handling of the same condition."""
         add_pending_row(moderacion_cog, post_id=1, author_id=404)
-        # bot.get_user(404) resolves to None - author has left the server.
+        # Not in the bot's user cache nor fetchable via the API - genuinely
+        # no longer a member.
         ctx = make_ctx(channel=moderacion_channels["mod"], content="%aceptar 1")
 
         vp = await moderacion_cog._get_validated_post(ctx, None, "%aceptar")
@@ -193,6 +225,28 @@ class TestGetValidatedPost:
         moderacion_channels["mod"].send.assert_awaited_once()
         (msg,), _ = moderacion_channels["mod"].send.call_args
         assert "404" in msg
+
+    async def test_author_only_resolvable_via_the_api_still_succeeds(
+        self, moderacion_cog, moderacion_channels
+    ):
+        """Regression test for a real report: clicking Aprobar on a
+        genuinely-still-a-member's post got "el autor ya no está en el
+        servidor" because bot.get_user() only consults the local user
+        cache, which - without the privileged Members intent - can miss
+        someone who's still in the server but hasn't triggered an event
+        the bot observed since its last reconnect/restart. _lookup_author's
+        fetch_member() fallback must still resolve them instead of treating
+        a cache miss as "no longer in the server"."""
+        add_pending_row(moderacion_cog, post_id=1, author_id=770973060496359454)
+        moderacion_cog.guild.members_by_id[770973060496359454] = make_member(
+            id=770973060496359454, name="remitente"
+        )
+        ctx = make_ctx(channel=moderacion_channels["mod"], content="%aceptar 1")
+
+        vp = await moderacion_cog._get_validated_post(ctx, None, "%aceptar")
+
+        assert vp is not None
+        assert vp.author.id == 770973060496359454
 
 
 # ---------------------------------------------------------------------------
@@ -265,26 +319,42 @@ class TestLogOnMessage:
 # get_mod_pending
 # ---------------------------------------------------------------------------
 class TestGetModPending:
-    def test_empty_data_sets_footer(self, moderacion_cog):
-        embed = moderacion_cog.get_mod_pending(moderacion_cog.bot.data_mod)
+    async def test_empty_data_sets_footer(self, moderacion_cog):
+        embed = await moderacion_cog.get_mod_pending(moderacion_cog.bot.data_mod)
 
         assert embed.footer.text == "No hay mensajes pendientes de moderación"
         assert len(embed.fields) == 0
 
-    def test_lists_pending_posts_with_known_authors(self, moderacion_cog):
+    async def test_lists_pending_posts_with_known_authors(self, moderacion_cog):
         add_pending_row(moderacion_cog, post_id=1, author_id=99, content="hola" * 20)
         moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
 
-        embed = moderacion_cog.get_mod_pending(moderacion_cog.bot.data_mod)
+        embed = await moderacion_cog.get_mod_pending(moderacion_cog.bot.data_mod)
 
         assert len(embed.fields) == 1
         assert "1" in embed.fields[0].name
 
-    def test_skips_posts_from_users_no_longer_in_the_server(self, moderacion_cog):
-        add_pending_row(moderacion_cog, post_id=1, author_id=404)
-        # bot.get_user(404) resolves to None - author has left the server.
+    async def test_lists_pending_posts_only_resolvable_via_the_api(self, moderacion_cog):
+        """Regression test: bot.get_user()/guild.get_member() only consult
+        the local cache, which (without the Members intent) can miss a
+        member who's still in the server but hasn't triggered an event the
+        bot observed since its last reconnect - _lookup_author's
+        fetch_member() fallback must still resolve them."""
+        add_pending_row(moderacion_cog, post_id=1, author_id=770973060496359454)
+        moderacion_cog.guild.members_by_id[770973060496359454] = make_member(
+            id=770973060496359454, name="remitente"
+        )
 
-        embed = moderacion_cog.get_mod_pending(moderacion_cog.bot.data_mod)
+        embed = await moderacion_cog.get_mod_pending(moderacion_cog.bot.data_mod)
+
+        assert len(embed.fields) == 1
+
+    async def test_skips_posts_from_users_no_longer_in_the_server(self, moderacion_cog):
+        add_pending_row(moderacion_cog, post_id=1, author_id=404)
+        # Not in the bot's user cache nor fetchable via the API - genuinely
+        # no longer a member.
+
+        embed = await moderacion_cog.get_mod_pending(moderacion_cog.bot.data_mod)
 
         assert len(embed.fields) == 0
         assert embed.footer.text == "No hay mensajes pendientes de moderación"
@@ -472,14 +542,15 @@ def _match_custom_id(button_cls, message_id):
 
 
 class TestPendingAuthor:
-    def test_resolves_the_author_of_a_pending_row(self, moderacion_cog):
+    async def test_resolves_the_author_of_a_pending_row(self, moderacion_cog):
         add_pending_row(moderacion_cog, post_id=1, author_id=99)
         moderacion_cog.bot.users_by_id[99] = make_member(id=99, name="remitente")
 
-        assert _pending_author(moderacion_cog, 1).id == 99
+        author = await _pending_author(moderacion_cog, 1)
+        assert author.id == 99
 
-    def test_unknown_message_id_returns_none(self, moderacion_cog):
-        assert _pending_author(moderacion_cog, 404) is None
+    async def test_unknown_message_id_returns_none(self, moderacion_cog):
+        assert await _pending_author(moderacion_cog, 404) is None
 
 
 class TestApproveButton:

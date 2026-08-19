@@ -116,6 +116,31 @@ def make_message(
     )
 
 
+def make_guild(id=333333333333333333, members=None):
+    """A fake ``discord.Guild`` for testing ``Moderacion._lookup_author``'s
+    cache-miss fallback.
+
+    ``get_member()`` (cache) always misses, matching the real bot's
+    un-chunked member cache without the privileged Members intent (see
+    bot.py). ``fetch_member()`` (an explicit API call, keyed by
+    ``members``) is the source of truth for whether someone is actually
+    still in the guild - raising ``discord.NotFound`` otherwise, the same
+    as the real API would for a member who genuinely left.
+    """
+    members = dict(members or {})
+    guild = SimpleNamespace(id=id, members_by_id=members)
+    guild.get_member = lambda uid: None
+
+    async def _fetch_member(uid):
+        member = guild.members_by_id.get(uid)
+        if member is None:
+            raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Unknown Member")
+        return member
+
+    guild.fetch_member = AsyncMock(side_effect=_fetch_member)
+    return guild
+
+
 def make_bot(channels=None, guild=None, user=None, users=None, guilds=None):
     """``channels``/``users`` are kept as live dicts on the returned bot (as
     ``bot.channels``/``bot.users_by_id``) so tests can register more entries

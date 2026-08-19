@@ -50,15 +50,17 @@ class ValidatedPost:
     author: discord.User
 
 
-def _pending_author(cog, message_id: int):
+async def _pending_author(cog, message_id: int):
     """Resolve a still-pending post's author live, at click time, from
     ``bot.data_mod`` - used by the persistent Aprobar/Rechazar buttons below
     so they never depend on the Python state of the moment the message was
-    first sent, which is gone after a bot restart."""
+    first sent, which is gone after a bot restart. Delegates to
+    ``Moderacion._lookup_author`` (falls back to fetching the member from
+    the API, not just the local cache - see its docstring)."""
     mod_row = cog.bot.data_mod.get(str(message_id))
     if mod_row is None:
         return None
-    return cog.bot.get_user(int(mod_row["author_id"]))
+    return await cog._lookup_author(int(mod_row["author_id"]))
 
 
 def _mention_or_unknown(author) -> str:
@@ -126,7 +128,7 @@ class ApproveButton(
         if cog is None:
             return
         mod = interaction.user
-        author = _pending_author(cog, self.message_id)
+        author = await _pending_author(cog, self.message_id)
         await interaction.response.send_message(
             f"{mod.mention} aprobó el mensaje {_mention_or_unknown(author)}.",
             ephemeral=True,
@@ -159,7 +161,7 @@ class RejectButton(
         cog = interaction.client.get_cog("Moderacion")
         if cog is None:
             return
-        author = _pending_author(cog, self.message_id)
+        author = await _pending_author(cog, self.message_id)
         await interaction.response.send_modal(
             RejectModal(cog=cog, message_id=self.message_id, author=author)
         )
@@ -183,9 +185,40 @@ class Moderacion(commands.Cog):
         self._msg_id = None
         self._msg_enc = None
         self.channels = {}
+        self.guild = None
 
     def _resolve_author(self, ctx) -> discord.User | discord.Member:
         return ctx.user if isinstance(ctx, discord.Interaction) else ctx.author
+
+    async def _lookup_author(self, author_id: int):
+        """Resolve a stored ``author_id`` to a Member/User.
+
+        ``bot.get_user()``/``guild.get_member()`` only consult the local
+        cache - since this bot doesn't request the privileged Members
+        intent (see bot.py), that cache only ever holds users the bot has
+        *directly* observed an event from since its last reconnect/restart.
+        Someone who's been a member of the server the whole time, but
+        hasn't sent a message/reaction/etc. since then, can still resolve
+        to None from cache alone even though they never left - so fall
+        back to fetching them from the API by ID, which works regardless
+        of intents (it's a single, explicit lookup, not the bulk member
+        list the Members intent gates).
+        """
+        user = self.bot.get_user(author_id)
+        if user is not None:
+            return user
+        if self.guild is None:
+            return None
+        member = self.guild.get_member(author_id)
+        if member is not None:
+            return member
+        try:
+            return await self.guild.fetch_member(author_id)
+        except discord.NotFound:
+            return None
+        except discord.HTTPException:
+            logger.exception("Fallo al buscar al member %s vía la API", author_id)
+            return None
 
     def _is_bot(self, ctx) -> bool:
         return self._resolve_author(ctx).id == config.BOT_ID
@@ -243,7 +276,7 @@ class Moderacion(commands.Cog):
         ch_main, ch_mod, ch_sub = self.get_channels_main_mod_sub(channel_id)
 
         message_dec = _decode_message(mod_row["message"])
-        author = self.bot.get_user(int(mod_row["author_id"]))
+        author = await self._lookup_author(int(mod_row["author_id"]))
         if author is None:
             # Same condition get_mod_pending() silently skips - here we can't
             # silently skip it (the moderator is actively trying to act on
@@ -319,6 +352,9 @@ class Moderacion(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
+        if self.guild is None:
+            self.guild = self.bot.get_guild(config.GUILD)
+
         if not self.channels:
             for channel, values in config.CHANNELS.items():
                 if values["submission"] not in self.channels:
@@ -456,14 +492,14 @@ class Moderacion(commands.Cog):
     async def rechazar_mensaje(self, ctx):
         await self._rechazar_mensaje(ctx)
 
-    def get_mod_pending(self, data):
+    async def get_mod_pending(self, data):
         messages = False
         embed = discord.Embed(
             title="Mensajes pendientes de moderación",
             colour=colors.BRAND,
         )
         for mod_row in data.values():
-            author = self.bot.get_user(int(mod_row["author_id"]))
+            author = await self._lookup_author(int(mod_row["author_id"]))
             if not author:
                 logger.warning("El author '%s' ya no existe en el server.", mod_row["author_id"])
                 continue
@@ -489,7 +525,7 @@ class Moderacion(commands.Cog):
         _post = ctx.message.content.replace("%mod", "").strip().split()
 
         if not _post:
-            await channel_mod.send(embed=self.get_mod_pending(self.bot.data_mod))
+            await channel_mod.send(embed=await self.get_mod_pending(self.bot.data_mod))
             return
 
         post_id = await self._parse_post_id(ctx, None, "%mod")
@@ -501,7 +537,14 @@ class Moderacion(commands.Cog):
             await channel_mod.send(f"ID no encontrado: {post_id}")
             return
 
-        author = self.bot.get_user(int(mod_row["author_id"]))
+        author = await self._lookup_author(int(mod_row["author_id"]))
+        if author is None:
+            logger.warning("El author '%s' ya no existe en el server.", mod_row["author_id"])
+            await channel_mod.send(
+                f"El autor del mensaje `{post_id}` (ID `{mod_row['author_id']}`) ya no está "
+                "en el servidor; no se puede mostrar."
+            )
+            return
         m_message = _decode_message(mod_row["message"])
 
         embed = discord.Embed(

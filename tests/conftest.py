@@ -3,7 +3,7 @@ import pytest
 from comandos.flood import FloodSpam
 from comandos.moderacion import Moderacion
 from comandos.retencion import Retencion
-from tests.factories import make_bot, make_role, make_text_channel
+from tests.factories import make_bot, make_guild, make_role, make_text_channel
 
 
 @pytest.fixture
@@ -46,11 +46,10 @@ def moderacion_channels(config):
 @pytest.fixture
 async def moderacion_cog(isolated_logs, moderacion_channels):
     """A Moderacion cog wired up the way on_ready() would (channel mapping
-    populated from config.CHANNELS), with an empty ``data_mod`` table."""
-    from types import SimpleNamespace
-
+    populated from config.CHANNELS, guild resolved via bot.get_guild), with
+    an empty ``data_mod`` table."""
     channels = {c.id: c for c in moderacion_channels.values()}
-    bot = make_bot(channels=channels, guild=SimpleNamespace(id=333333333333333333))
+    bot = make_bot(channels=channels, guild=make_guild())
     bot.data_mod = {}  # message_id -> row dict, same shape as read_csv_dicts() rows
     cog = Moderacion(bot)
     await cog.on_ready()
